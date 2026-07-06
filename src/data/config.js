@@ -35,8 +35,11 @@ export const CONFIG = Object.freeze({
     shakeOnDeath: 14,
   },
   progression: {
-    xpBase: 12,           // xp to reach level 2
-    xpGrowth: 1.35,       // multiplier per level
+    // Smooth geometric curve: xpForLevel(n) = round(xpBase × xpGrowth^(n-1)).
+    // Early levels stay rewarding; mid/late levels demand progressively more.
+    //   L1→2:100  L2→3:138  L3→4:190  L4→5:262  L5→6:362 ...
+    xpBase: 100,          // xp to reach level 2
+    xpGrowth: 1.38,       // multiplier per level (each level costs 38% more)
     upgradesOnLevel: 3,   // choices offered
   },
   dungeon: {
@@ -47,6 +50,7 @@ export const CONFIG = Object.freeze({
     master: 0.6,
     music: 0.4,
     sfx: 0.7,
+    ui: 0.6,
   },
 });
 
@@ -66,6 +70,7 @@ export const GAME_STATE = Object.freeze({
   PLAYING: 'playing',
   UPGRADE: 'upgrade',
   EVENT: 'event',
+  SETTINGS: 'settings',
   PAUSED: 'paused',
   GAMEOVER: 'gameover',
   VICTORY: 'victory',

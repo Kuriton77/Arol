@@ -9,11 +9,22 @@ export class AudioManager {
     this.master = null;
     this.musicGain = null;
     this.sfxGain = null;
+    this.uiGain = null;
     this.enabled = true;
     this._musicTimer = 0;
     this._step = 0;
     this._mood = 'explore';
     this._muted = false;
+    // Category volumes (0..1). Held here so they survive across init() and can
+    // be set before the AudioContext exists (e.g. from loaded settings).
+    // The node graph (music/sfx/ui → master → out) makes each category's
+    // effective loudness category × master automatically.
+    this.volumes = {
+      master: CONFIG.audio.master,
+      music: CONFIG.audio.music,
+      sfx: CONFIG.audio.sfx,
+      ui: CONFIG.audio.ui,
+    };
   }
 
   // Must be resumed from a user gesture (browser autoplay policy).
@@ -23,23 +34,41 @@ export class AudioManager {
     if (!AC) { this.enabled = false; return; }
     this.ctx = new AC();
     this.master = this.ctx.createGain();
-    this.master.gain.value = CONFIG.audio.master;
     this.master.connect(this.ctx.destination);
-
     this.musicGain = this.ctx.createGain();
-    this.musicGain.gain.value = CONFIG.audio.music;
     this.musicGain.connect(this.master);
-
     this.sfxGain = this.ctx.createGain();
-    this.sfxGain.gain.value = CONFIG.audio.sfx;
     this.sfxGain.connect(this.master);
+    this.uiGain = this.ctx.createGain();
+    this.uiGain.connect(this.master);
+    // Push whatever volumes are currently set (defaults or loaded settings).
+    this._applyVolumes();
   }
 
   resume() { if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume(); }
 
+  // Write the current volume model into the live gain nodes (if they exist).
+  _applyVolumes() {
+    if (!this.master) return;
+    this.master.gain.value = this._muted ? 0 : this.volumes.master;
+    this.musicGain.gain.value = this.volumes.music;
+    this.sfxGain.gain.value = this.volumes.sfx;
+    this.uiGain.gain.value = this.volumes.ui;
+  }
+
+  // Real-time volume setter used by the settings sliders. `category` is one of
+  // master | music | sfx | ui; `v` is 0..1. Master multiplies every category
+  // via the node graph, so e.g. master 0.5 × music 0.8 = 0.4 effective.
+  setVolume(category, v) {
+    if (!(category in this.volumes)) return;
+    this.volumes[category] = Math.max(0, Math.min(1, v));
+    this._applyVolumes();
+  }
+  getVolume(category) { return this.volumes[category] ?? 0; }
+
   setMuted(m) {
     this._muted = m;
-    if (this.master) this.master.gain.value = m ? 0 : CONFIG.audio.master;
+    this._applyVolumes();
   }
   toggleMute() { this.setMuted(!this._muted); return this._muted; }
 
@@ -97,8 +126,8 @@ export class AudioManager {
       case 'die':     this._tone(200, 0.3, 'sawtooth', 0.25, null, -160); this._noise(0.25, 0.2, 900); break;
       case 'pickup':  this._tone(700, 0.08, 'sine', 0.2); this._tone(1050, 0.1, 'sine', 0.18); break;
       case 'levelup': [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => this._tone(f, 0.18, 'triangle', 0.22), i * 70)); break;
-      case 'ui':      this._tone(600, 0.05, 'square', 0.12); break;
-      case 'uiconfirm': this._tone(720, 0.07, 'square', 0.15); this._tone(960, 0.08, 'square', 0.13); break;
+      case 'ui':      this._tone(600, 0.05, 'square', 0.12, this.uiGain); break;
+      case 'uiconfirm': this._tone(720, 0.07, 'square', 0.15, this.uiGain); this._tone(960, 0.08, 'square', 0.13, this.uiGain); break;
       case 'bossroar': this._tone(90, 0.6, 'sawtooth', 0.35, null, -30); this._noise(0.5, 0.3, 600); break;
       case 'boom':    this._tone(70, 0.4, 'sawtooth', 0.35, null, -40); this._noise(0.35, 0.35, 700); break;
       case 'blink':   this._tone(980, 0.1, 'sine', 0.12, null, -500); break;

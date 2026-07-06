@@ -1,16 +1,23 @@
 // Tiny immediate-mode UI toolkit. Each frame the active screen declares its
 // buttons/panels; UI both draws them and reports clicks/hover using the shared
 // Input. This keeps menu code declarative and avoids callback plumbing.
+import { clamp } from '../core/math.js';
+
 export class UI {
   constructor(ctx, input, audio) {
     this.ctx = ctx;
     this.input = input;
     this.audio = audio;
     this._hoverPrev = null;
+    this._activeSlider = null; // id of the slider currently being dragged
   }
 
   // Begin a frame of UI (call once before declaring widgets).
-  begin() { this._hoveredAny = false; }
+  begin() {
+    this._hoveredAny = false;
+    // Drop the drag latch as soon as the mouse is released.
+    if (!this.input.mouse.down) this._activeSlider = null;
+  }
 
   panel(x, y, w, h, opts = {}) {
     const c = this.ctx;
@@ -85,6 +92,36 @@ export class UI {
     const c = this.ctx;
     c.fillStyle = `rgba(6,8,16,${alpha})`;
     c.fillRect(0, 0, c.canvas.width, c.canvas.height);
+  }
+
+  // Draggable horizontal slider (immediate-mode). `id` latches the active drag
+  // across frames so the value updates live while the mouse is held anywhere.
+  // Returns the current value in [0,1]; caller compares to detect changes.
+  slider(x, y, w, id, value, opts = {}) {
+    const c = this.ctx;
+    const m = this.input;
+    const h = opts.height ?? 8;
+    const cy = y + h / 2;
+    const pad = 10; // generous vertical hit padding for the track
+    const overTrack = m.mouse.x >= x - 8 && m.mouse.x <= x + w + 8 &&
+                      m.mouse.y >= cy - pad && m.mouse.y <= cy + pad;
+    if (m.mouse.pressed && overTrack) this._activeSlider = id;
+    let v = clamp(value, 0, 1);
+    if (this._activeSlider === id) v = clamp((m.mouse.x - x) / w, 0, 1);
+
+    const accent = opts.color || '#63b8ff';
+    // Track.
+    c.fillStyle = 'rgba(0,0,0,0.5)';
+    roundRect(c, x, cy - h / 2, w, h, h / 2); c.fill();
+    // Fill.
+    c.fillStyle = accent;
+    roundRect(c, x, cy - h / 2, Math.max(h, w * v), h, h / 2); c.fill();
+    // Handle.
+    const hx = x + w * v;
+    c.fillStyle = this._activeSlider === id ? '#ffffff' : '#dde8ff';
+    c.strokeStyle = accent; c.lineWidth = 2;
+    c.beginPath(); c.arc(hx, cy, opts.handle ?? 8, 0, Math.PI * 2); c.fill(); c.stroke();
+    return v;
   }
 }
 

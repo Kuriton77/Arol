@@ -31,13 +31,19 @@ import { UI } from '../ui/UI.js';
 import { Screens } from '../ui/Screens.js';
 import { derive } from '../systems/Stats.js';
 
+// Distance the player must move from a reward pad before a snoozed shop/event
+// re-arms. Larger than the ~32px open radius so closing stays closed on-pad.
+const REWARD_REARM_DIST = 80;
+
 export class Game {
-  constructor(canvas, input, audio, save) {
+  constructor(canvas, input, audio, save, settings = null) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.input = input;
     this.audio = audio;
     this.save = save;
+    this.settings = settings;
+    this._settingsReturn = null; // state to restore when settings closes
     this.bus = new EventBus();
 
     this.camera = new Camera(CONFIG.world.width, CONFIG.world.height);
@@ -114,11 +120,28 @@ export class Game {
     window.addEventListener('keydown', (e) => {
       const k = e.key.toLowerCase();
       if (k === 'escape' || k === 'p') {
-        if (this.state === GAME_STATE.PLAYING) this._setState(GAME_STATE.PAUSED);
+        // ESC in Settings closes it back to wherever it was opened from,
+        // never touching the underlying pause/menu state.
+        if (this.state === GAME_STATE.SETTINGS) { this._closeSettings(); }
+        else if (this.state === GAME_STATE.PLAYING) this._setState(GAME_STATE.PAUSED);
         else if (this.state === GAME_STATE.PAUSED) this._setState(GAME_STATE.PLAYING);
       }
       if (k === 'm') { const muted = this.audio.toggleMute(); this.prompt = muted ? 'Muted' : null; }
     });
+  }
+
+  // --- Settings overlay: single instance, restores its origin state on close.
+  _openSettings() {
+    if (this.state === GAME_STATE.SETTINGS) return; // never stack
+    this._settingsReturn = this.state;               // MENU or PAUSED
+    this._setState(GAME_STATE.SETTINGS);
+    this.audio.play('ui');
+  }
+  _closeSettings() {
+    if (this.state !== GAME_STATE.SETTINGS) return;
+    this._setState(this._settingsReturn || GAME_STATE.MENU);
+    this._settingsReturn = null;
+    this.audio.play('ui');
   }
 
   // ---------------------------------------------------------------- lifecycle
@@ -224,6 +247,10 @@ export class Game {
     this.prompt = null;
     this.eventFight = null;
     this.currentEvent = null;
+    // Shop overlay is state, not a persistent instance — ensure it's closed
+    // whenever we change rooms so it can never linger across rooms.
+    this.shopMode = false;
+    this.shopItems = null;
 
     // Place the player just inside the entry door (or centre on first spawn).
     if (entryDir) {
@@ -428,10 +455,12 @@ export class Game {
       this.prompt = null;
       this._queueUpgrades(1, 'relic');
     } else if (room.reward.kind === 'shop') {
+      // Reopens only after the player steps away (see _rewardSnoozed release).
+      if (room._rewardSnoozed) return;
       this._openShop();
     } else if (room.reward.kind === 'event') {
       // Snoozed events reopen once the player steps away and returns.
-      if (room._eventSnoozed) return;
+      if (room._rewardSnoozed) return;
       this.currentEvent = eventById(room.reward.variant);
       this._setState(GAME_STATE.EVENT);
       this.audio.play('ui');
@@ -445,7 +474,7 @@ export class Game {
     this.currentEvent = null;
     if (!opt) {
       // Leave without committing — the event stays available.
-      room._eventSnoozed = true;
+      room._rewardSnoozed = true;
       this._setState(GAME_STATE.PLAYING);
       return;
     }
@@ -506,6 +535,7 @@ export class Game {
 
   // Hidden-merchant variant of the shop: relic stock at premium prices.
   _openRelicShop() {
+    if (this.shopMode) return; // single shop instance
     this.shopMode = true;
     const picks = drawUpgrades(this.rng, 3, this.ownedCounts, RELICS, this.biome ? this.biome.lootBias : null);
     const costBase = { common: 22, rare: 32, epic: 48, legendary: 75 };
@@ -519,6 +549,7 @@ export class Game {
   }
 
   _openShop() {
+    if (this.shopMode) return; // single shop instance — never stack overlays
     this.shopMode = true;
     const picks = drawUpgrades(this.rng, 3, this.ownedCounts, this.boonPool);
     const costBase = { common: 8, rare: 14, epic: 22, legendary: 35 };
@@ -542,7 +573,9 @@ export class Game {
   _closeShop() {
     this.shopMode = false;
     this.shopItems = null;
-    if (this.currentRoom.reward) this.currentRoom.reward.exhausted = true;
+    // Snooze so the shop stays shut while the player is on the pad; stepping
+    // away re-arms it (see the _rewardSnoozed release in _updatePlaying).
+    if (this.currentRoom) this.currentRoom._rewardSnoozed = true;
     this.prompt = 'Come back anytime — the shopkeeper waits';
     this._setState(GAME_STATE.PLAYING);
   }
@@ -660,6 +693,7 @@ export class Game {
       case GAME_STATE.MENU:
       case GAME_STATE.UPGRADE:
       case GAME_STATE.EVENT:
+      case GAME_STATE.SETTINGS:
       case GAME_STATE.PAUSED:
       case GAME_STATE.GAMEOVER:
       case GAME_STATE.VICTORY:
@@ -830,10 +864,11 @@ export class Game {
       }
       if (this.eventFight && this.enemies.length === 0) this._resolveEventFight(true);
     }
-    // Release snoozed events once the player steps away from the sigil.
-    if (this.currentRoom && this.currentRoom._eventSnoozed) {
+    // Re-arm a snoozed reward (shop / event) once the player steps away from
+    // the pad, so closing it stays closed until deliberately re-triggered.
+    if (this.currentRoom && this.currentRoom._rewardSnoozed) {
       const dx = p.x - this.currentRoom.bounds.w / 2, dy = p.y - this.currentRoom.bounds.h / 2;
-      if (dx * dx + dy * dy > 80 * 80) this.currentRoom._eventSnoozed = false;
+      if (dx * dx + dy * dy > REWARD_REARM_DIST * REWARD_REARM_DIST) this.currentRoom._rewardSnoozed = false;
     }
 
     // --- world checks ---
@@ -878,8 +913,10 @@ export class Game {
     c.fillStyle = '#06070c';
     c.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
-    const inWorld = [GAME_STATE.PLAYING, GAME_STATE.UPGRADE, GAME_STATE.EVENT, GAME_STATE.PAUSED].includes(this.state) ||
+    let inWorld = [GAME_STATE.PLAYING, GAME_STATE.UPGRADE, GAME_STATE.EVENT, GAME_STATE.PAUSED].includes(this.state) ||
                     (this.state === GAME_STATE.GAMEOVER) || (this.state === GAME_STATE.VICTORY);
+    // Settings opened from pause keeps the paused world visible behind it.
+    if (this.state === GAME_STATE.SETTINGS && this._settingsReturn === GAME_STATE.PAUSED) inWorld = true;
 
     if (this.player && inWorld && this.currentRoom) {
       this.renderer.draw(this);
@@ -923,6 +960,7 @@ export class Game {
       case GAME_STATE.MENU: this.screens.menu(); break;
       case GAME_STATE.UPGRADE: this.screens.upgrade(); break;
       case GAME_STATE.EVENT: this.screens.event(); break;
+      case GAME_STATE.SETTINGS: this.screens.settings(); break;
       case GAME_STATE.PAUSED: this.screens.pause(); break;
       case GAME_STATE.GAMEOVER: this.screens.gameOver(); break;
       case GAME_STATE.VICTORY: this.screens.victory(); break;

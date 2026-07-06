@@ -528,6 +528,92 @@ assert(diffPhase.fallbackOk, 'unknown/missing difficulty falls back to Normal');
 assert(diffPhase.greedOk, 'pluggable modifier scales only its target stat');
 assert(diffPhase.scalingOk, `Easy (×${diffPhase.easyHp}) < Inferno (×${diffPhase.infHp}) enemy HP in-game`);
 
+// --- Shop bug: closing must stay closed until the player steps away ---
+const shopPhase = await page.evaluate(() => {
+  const g = window.__AROL__;
+  g.save.data.difficulty = 'normal';
+  g.startRun();
+  const shopRoom = g.dungeon.rooms.find((r) => r.reward && r.reward.kind === 'shop');
+  if (!shopRoom) return { noShop: true };
+  g._enterRoom(shopRoom, null, false);
+  // Stand on the pad and trigger the shop.
+  g.player.x = shopRoom.bounds.w / 2; g.player.y = shopRoom.bounds.h / 2;
+  g._tryReward();
+  const opened = g.state === 'upgrade' && g.shopMode;
+  // Close it while still standing on the pad.
+  g._closeShop();
+  const closedOnce = !g.shopMode && g.state === 'playing';
+  // Simulate several frames standing on the pad — it must NOT reopen.
+  let reopened = false;
+  for (let f = 0; f < 30; f++) { g._tryReward(); if (g.shopMode) { reopened = true; break; } }
+  // Step away past the re-arm distance, then step back — it should reopen.
+  g.player.x = shopRoom.bounds.w / 2 + 200;
+  for (let f = 0; f < 5; f++) g.update(1 / 60); // release snooze
+  g.player.x = shopRoom.bounds.w / 2;
+  g._tryReward();
+  const reopensLater = g.shopMode;
+  if (g.shopMode) g._closeShop();
+  return { opened, closedOnce, reopened, reopensLater };
+});
+console.log('  shop phase:', JSON.stringify(shopPhase));
+assert(shopPhase.noShop || shopPhase.opened, 'shop opens on its trigger');
+assert(shopPhase.noShop || shopPhase.closedOnce, 'closing the shop fully closes it');
+assert(shopPhase.noShop || !shopPhase.reopened, 'shop does NOT reopen while standing on the pad (bug fixed)');
+assert(shopPhase.noShop || shopPhase.reopensLater, 'shop reopens after stepping away and returning');
+
+// --- XP curve: geometric, monotonic, matches the requested shape ---
+const xpPhase = await page.evaluate(async () => {
+  const { CONFIG } = await import('./src/data/config.js');
+  const { xpBase, xpGrowth } = CONFIG.progression;
+  const need = [];
+  let x = xpBase;
+  for (let i = 0; i < 5; i++) { need.push(Math.round(x)); x *= xpGrowth; }
+  const monotonic = need.every((v, i) => i === 0 || v > need[i - 1]);
+  return { need, xpBase, monotonic };
+});
+console.log('  xp phase:', JSON.stringify(xpPhase));
+assert(xpPhase.xpBase >= 90, `level 2 costs ~100 XP (${xpPhase.xpBase}), not the old 12`);
+assert(xpPhase.monotonic, 'every level requires more XP than the previous');
+
+// --- Settings: schema, persistence, real-time audio, master×category ---
+const setPhase = await page.evaluate(async () => {
+  const g = window.__AROL__;
+  const { SettingsManager } = await import('./src/systems/SettingsManager.js');
+  // Persistence round-trip via a fresh instance reading localStorage.
+  const sm = new SettingsManager();
+  sm.bind({ audio: g.audio, game: g });
+  sm.set('volMaster', 0.5);
+  sm.set('volMusic', 0.8);
+  const persisted = new SettingsManager().get('volMaster') === 0.5;
+  // Real-time audio: master × category via the gain-node graph.
+  const masterGain = g.audio.master ? g.audio.master.gain.value : g.audio.getVolume('master');
+  const musicGain = g.audio.musicGain ? g.audio.musicGain.gain.value : g.audio.getVolume('music');
+  const audioOk = Math.abs(g.audio.getVolume('master') - 0.5) < 1e-6
+    && Math.abs(g.audio.getVolume('music') - 0.8) < 1e-6;
+  // Toggle path: Damage Numbers off disables the FX flag.
+  sm.set('damageNumbers', false);
+  const toggleOk = g.damageNumbers.enabled === false;
+  sm.set('damageNumbers', true);
+  // Unknown/missing key falls back to schema default.
+  const missingOk = new SettingsManager().get('volSfx') !== undefined;
+  // Open/close never disturbs the underlying state.
+  g._setState('paused');
+  g._openSettings();
+  const openedFromPause = g.state === 'settings' && g._settingsReturn === 'paused';
+  g._closeSettings();
+  const restoredPause = g.state === 'paused';
+  g._setState('menu');
+  return { persisted, audioOk, toggleOk, missingOk, openedFromPause, restoredPause,
+           categories: sm.categories() };
+});
+console.log('  settings phase:', JSON.stringify(setPhase));
+assert(setPhase.persisted, 'settings persist across instances (localStorage)');
+assert(setPhase.audioOk, 'volume sliders update audio in real time');
+assert(setPhase.toggleOk, 'toggle settings apply live (damage numbers)');
+assert(setPhase.missingOk, 'missing setting falls back to default');
+assert(setPhase.openedFromPause && setPhase.restoredPause, 'settings restores pause state on close');
+assert(setPhase.categories.includes('Audio'), 'settings expose an Audio category');
+
 console.log('\nConsole errors:', errors.length);
 errors.slice(0, 20).forEach((e) => console.log('  !', e));
 assert(errors.length === 0, 'no console/page errors during full run');

@@ -9,6 +9,7 @@ import { WEAPONS } from '../data/weapons.js';
 import { RARITY } from '../data/upgrades.js';
 import { PACTS, totalHeat, SOUL_BONUS_PER_HEAT, HEAT_MILESTONES } from '../data/pacts.js';
 import { DIFFICULTIES, difficultyById } from '../systems/DifficultyManager.js';
+import { SETTINGS_SCHEMA } from '../systems/SettingsManager.js';
 import { roundRect } from './UI.js';
 
 const TABS = [
@@ -40,6 +41,9 @@ export class Screens {
 
     ui.text('A R O L', this.W / 2, 52, { font: 'bold 44px "Trebuchet MS", system-ui', align: 'center', color: '#eaf1ff', shadow: true });
     ui.text(`✦ ${g.save.data.souls} souls`, this.W / 2, 80, { font: 'bold 17px system-ui', align: 'center', color: '#b48cff' });
+
+    // Settings gear (top-right).
+    if (ui.button(this.W - 116, 20, 96, 34, '⚙ Settings', { font: 'bold 13px system-ui', color: '#1c2236', hoverColor: '#28304e' })) g._openSettings();
 
     // Tab bar.
     const tw = 130, tx0 = this.W / 2 - (TABS.length * tw) / 2;
@@ -404,14 +408,58 @@ export class Screens {
   pause() {
     const ui = this.ui, g = this.game;
     ui.dim(0.6);
-    ui.text('PAUSED', this.W / 2, this.H / 2 - 110, { font: 'bold 40px system-ui', align: 'center', color: '#eaf1ff' });
+    ui.text('PAUSED', this.W / 2, this.H / 2 - 130, { font: 'bold 40px system-ui', align: 'center', color: '#eaf1ff' });
     const bx = this.W / 2 - 120;
-    if (ui.button(bx, this.H / 2 - 50, 240, 46, 'Resume', { color: '#2f6f4f', hoverColor: '#3f9968' })) g._setState(GAME_STATE.PLAYING);
-    if (ui.button(bx, this.H / 2 + 6, 240, 46, g.audio._muted ? 'Unmute (M)' : 'Mute (M)')) g.audio.toggleMute();
-    if (ui.button(bx, this.H / 2 + 62, 240, 46, 'Abandon Run', { color: '#6f2f38', hoverColor: '#993f4a' })) {
+    if (ui.button(bx, this.H / 2 - 76, 240, 44, 'Resume', { color: '#2f6f4f', hoverColor: '#3f9968' })) g._setState(GAME_STATE.PLAYING);
+    if (ui.button(bx, this.H / 2 - 26, 240, 44, '⚙  Settings')) g._openSettings();
+    if (ui.button(bx, this.H / 2 + 24, 240, 44, g.audio._muted ? 'Unmute (M)' : 'Mute (M)')) g.audio.toggleMute();
+    if (ui.button(bx, this.H / 2 + 74, 240, 44, 'Abandon Run', { color: '#6f2f38', hoverColor: '#993f4a' })) {
       g._commitRun(false);
       g._setState(GAME_STATE.MENU);
     }
+  }
+
+  // ---------------------------------------------------------------- settings
+  // Data-driven from SETTINGS_SCHEMA: sliders + toggles grouped by category.
+  // Overlays whatever it was opened from (menu backdrop or paused world).
+  settings() {
+    const c = this.ctx, ui = this.ui, g = this.game, s = g.settings;
+    ui.dim(0.8);
+    ui.text('SETTINGS', this.W / 2, 62, { font: 'bold 34px "Trebuchet MS", system-ui', align: 'center', color: '#eaf1ff', shadow: true });
+    ui.text('drag sliders · click toggles · ESC to close', this.W / 2, 88,
+      { font: '13px system-ui', align: 'center', color: '#8fa4cc' });
+
+    const px = this.W / 2 - 300, pw = 600;
+    ui.panel(px, 108, pw, 348);
+    let y = 132;
+    for (const cat of s.categories()) {
+      ui.text(cat.toUpperCase(), px + 28, y + 6, { font: 'bold 14px system-ui', color: '#9fb2dd' });
+      y += 28;
+      for (const opt of SETTINGS_SCHEMA.filter((o) => o.category === cat)) {
+        const val = s.get(opt.id);
+        ui.text(opt.label, px + 40, y + 15, { font: '14px system-ui', color: '#e8ecf5' });
+        if (opt.type === 'slider') {
+          const sx = px + 250, sw = 210;
+          const nv = ui.slider(sx, y + 11, sw, opt.id, val, { color: '#63b8ff' });
+          if (Math.abs(nv - val) > 0.0005) s.set(opt.id, nv);
+          ui.text(`${Math.round(s.get(opt.id) * 100)}%`, px + pw - 28, y + 15,
+            { font: 'bold 13px system-ui', align: 'right', color: '#bfe8ff' });
+        } else if (opt.type === 'toggle') {
+          if (ui.button(px + pw - 116, y, 88, 30, val ? 'ON' : 'OFF', {
+            color: val ? '#2f6f4f' : '#3a3a4a', hoverColor: val ? '#3f9968' : '#4a4a5f',
+            font: 'bold 13px system-ui',
+          })) s.toggle(opt.id);
+        }
+        y += 42;
+      }
+      y += 10;
+    }
+
+    if (ui.button(this.W / 2 - 180, 470, 170, 42, 'Reset Defaults', { color: '#3a3a4a', hoverColor: '#4a4a5f' })) {
+      s.reset();
+      g.audio.play('uiconfirm');
+    }
+    if (ui.button(this.W / 2 + 10, 470, 170, 42, 'Close', { color: '#2f6f4f', hoverColor: '#3f9968' })) g._closeSettings();
   }
 
   // --------------------------------------------------------------- game over

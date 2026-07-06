@@ -9,9 +9,11 @@ export class Camera {
     this.ox = 0; this.oy = 0;    // target offset (for room transitions)
     this.trauma = 0;             // 0..1, decays over time
     this._t = 0;
+    this.shakeEnabled = true;    // toggled by the Screen Shake setting
   }
 
   addShake(amount) {
+    if (!this.shakeEnabled) return;
     this.trauma = clamp(this.trauma + amount / 20, 0, 1);
   }
 

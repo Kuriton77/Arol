@@ -3,6 +3,7 @@ import { ObjectPool } from '../core/ObjectPool.js';
 
 export class DamageNumbers {
   constructor() {
+    this.enabled = true; // toggled by the Damage Numbers setting
     this.pool = new ObjectPool(
       () => ({ x: 0, y: 0, vy: 0, life: 0, text: '', crit: false, color: '#fff', dead: false }),
       (n, o) => Object.assign(n, o),
@@ -10,6 +11,7 @@ export class DamageNumbers {
   }
 
   add(x, y, amount, opts = {}) {
+    if (!this.enabled) return;
     this.pool.spawn({
       x: x + (Math.random() - 0.5) * 16,
       y: y - 10,
