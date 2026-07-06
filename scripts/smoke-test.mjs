@@ -561,6 +561,89 @@ assert(shopPhase.noShop || shopPhase.closedOnce, 'closing the shop fully closes 
 assert(shopPhase.noShop || !shopPhase.reopened, 'shop does NOT reopen while standing on the pad (bug fixed)');
 assert(shopPhase.noShop || shopPhase.reopensLater, 'shop reopens after stepping away and returning');
 
+// --- Shop: persistent inventory, level-scaling prices, single reroll ---
+const shopInvPhase = await page.evaluate(async () => {
+  const { CONFIG } = await import('./src/data/config.js');
+  const g = window.__AROL__;
+  g.save.data.difficulty = 'normal';
+  g.save.data.metaNodes = {}; // no shop-discount / fated interference
+  g.startRun();
+  const room = g.dungeon.rooms.find((r) => r.reward && r.reward.kind === 'shop');
+  if (!room) return { noShop: true };
+  g._enterRoom(room, null, false);
+  g.player.gold = 100000;
+  g.player.level = 1;
+
+  const ids = () => room.shopInventory.items.map((it) => it.upgrade.id);
+  const open = () => { g.player.x = room.bounds.w / 2; g.player.y = room.bounds.h / 2; g._tryReward(); };
+  const stepAwayClose = () => {
+    g._closeShop();
+    g.player.x = room.bounds.w / 2 + 200;
+    for (let f = 0; f < 5; f++) g.update(1 / 60); // release snooze
+  };
+
+  open();
+  const first = ids();
+  const bases = room.shopInventory.items.map((it) => it.basePrice);
+
+  // Persistence: close + reopen ⇒ identical inventory.
+  stepAwayClose();
+  open();
+  const persisted = JSON.stringify(ids()) === JSON.stringify(first);
+
+  // Purchased stays sold across reopen.
+  g._buyShopItem(room.shopInventory.items[0]);
+  const boughtId = room.shopInventory.items[0].upgrade.id;
+  stepAwayClose();
+  open();
+  const stillSold = room.shopInventory.items[0].bought === true
+    && room.shopInventory.items[0].upgrade.id === boughtId;
+
+  // Level-scaling price, derived from a fixed base (base never mutated).
+  g.player.level = 1;
+  const p1 = g._shopPrice(bases[1]);
+  g.player.level = 5;
+  const p5 = g._shopPrice(bases[1]);
+  const expected5 = Math.round(bases[1] * Math.pow(CONFIG.shop.priceLevelMultiplier, 4));
+  const baseUnchanged = room.shopInventory.items[1].basePrice === bases[1];
+  const priceScales = p5 === expected5 && p5 > p1;
+
+  // Reroll: once per shop, costs gold, preserves sold slots, then locks.
+  g.player.level = 1;
+  g.player.gold = 100000;
+  const goldBefore = g.player.gold;
+  const rcost = g._rerollCost();
+  const soldBefore = room.shopInventory.items.map((it) => it.bought);
+  g._rerollShop();
+  const rerolledFlag = room.shopInventory.items && room.shopInventory.rerolled === true;
+  const goldSpent = goldBefore - g.player.gold === rcost;
+  const soldKept = room.shopInventory.items.every((it, i) => (soldBefore[i] ? it.bought : true))
+    && room.shopInventory.items[0].bought === true; // slot 0 was purchased
+  // Second reroll must be a no-op (locked).
+  const goldAfterFirst = g.player.gold;
+  g._rerollShop();
+  const secondBlocked = g.player.gold === goldAfterFirst;
+
+  // Reroll cost scales with level too.
+  g.player.level = 1; const rc1 = g._rerollCost();
+  g.player.level = 6; const rc6 = g._rerollCost();
+  const rerollScales = rc6 > rc1 && rc6 === Math.round(CONFIG.shop.rerollCost * Math.pow(CONFIG.shop.priceLevelMultiplier, 5));
+
+  if (g.shopMode) g._closeShop();
+  return { persisted, stillSold, priceScales, baseUnchanged, p1, p5, expected5,
+           rerolledFlag, goldSpent, soldKept, secondBlocked, rerollScales,
+           rerollBase: CONFIG.shop.rerollCost };
+});
+console.log('  shop-inv phase:', JSON.stringify(shopInvPhase));
+assert(shopInvPhase.noShop || shopInvPhase.persisted, 'shop inventory persists identically across close/reopen');
+assert(shopInvPhase.noShop || shopInvPhase.stillSold, 'purchased items stay sold on reopen');
+assert(shopInvPhase.noShop || (shopInvPhase.priceScales && shopInvPhase.baseUnchanged),
+  `prices scale by level from a fixed base (L1 ${shopInvPhase.p1} → L5 ${shopInvPhase.p5})`);
+assert(shopInvPhase.noShop || (shopInvPhase.rerolledFlag && shopInvPhase.goldSpent), 'reroll costs gold and marks the shop rerolled');
+assert(shopInvPhase.noShop || shopInvPhase.soldKept, 'reroll preserves already-purchased slots');
+assert(shopInvPhase.noShop || shopInvPhase.secondBlocked, 'only one reroll per shop (second is a no-op)');
+assert(shopInvPhase.noShop || shopInvPhase.rerollScales, 'reroll cost scales with the same multiplier');
+
 // --- XP curve: geometric, monotonic, matches the requested shape ---
 const xpPhase = await page.evaluate(async () => {
   const { CONFIG } = await import('./src/data/config.js');

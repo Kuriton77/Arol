@@ -533,41 +533,78 @@ export class Game {
     }
   }
 
+  // --- Shop pricing (single source of truth) -------------------------------
+  // Displayed price is always derived from an item's base price and the
+  // player's current level — item base prices are never mutated, so prices
+  // update live on level-up and never reset during a run. Extensible: extra
+  // multipliers (discounts, lucky merchants, dynamic economy) slot in here.
+  _shopPrice(basePrice) {
+    const levelMult = Math.pow(CONFIG.shop.priceLevelMultiplier, this.player.level - 1);
+    const discount = 1 - Math.min(0.5, this.player.stats.shopDiscount);
+    return Math.max(1, Math.round(basePrice * levelMult * discount));
+  }
+  // Reroll cost scales with the same pricing function.
+  _rerollCost() { return this._shopPrice(CONFIG.shop.rerollCost); }
+
+  // Build a fresh inventory of {upgrade, basePrice, bought} from a pool.
+  _genShopItems(pool, costBase, bias, count = CONFIG.shop.items) {
+    const picks = drawUpgrades(this.rng, count, this.ownedCounts, pool, bias);
+    return picks.map((u) => ({ upgrade: u, basePrice: costBase[u.rarity] ?? 10, bought: false }));
+  }
+
   // Hidden-merchant variant of the shop: relic stock at premium prices.
   _openRelicShop() {
-    if (this.shopMode) return; // single shop instance
-    this.shopMode = true;
-    const picks = drawUpgrades(this.rng, 3, this.ownedCounts, RELICS, this.biome ? this.biome.lootBias : null);
-    const costBase = { common: 22, rare: 32, epic: 48, legendary: 75 };
-    const discount = 1 - Math.min(0.5, this.player.stats.shopDiscount);
-    this.shopItems = picks.map((u) => ({
-      upgrade: u,
-      cost: Math.max(1, Math.round(costBase[u.rarity] * (1 + (this.floor - 1) * 0.25) * discount)),
-      bought: false,
-    }));
-    this._setState(GAME_STATE.UPGRADE);
+    this._enterShop(RELICS, CONFIG.shop.relicCostBase, this.biome ? this.biome.lootBias : null);
   }
 
   _openShop() {
+    this._enterShop(this.boonPool, CONFIG.shop.costBase, null);
+  }
+
+  // Open a shop of a given kind. Inventory is generated ONCE per room and
+  // persisted on the room, so closing/reopening restores the exact same
+  // stock, sold-out slots, and reroll state until the shop is left for good
+  // (a new floor regenerates rooms, giving a fresh shop).
+  _enterShop(pool, costBase, bias) {
     if (this.shopMode) return; // single shop instance — never stack overlays
+    const room = this.currentRoom;
+    if (!room.shopInventory) {
+      room.shopInventory = {
+        items: this._genShopItems(pool, costBase, bias),
+        rerolled: false,
+        pool, costBase, bias, // remembered so a reroll draws from the same source
+      };
+    }
+    this.shopItems = room.shopInventory.items;
     this.shopMode = true;
-    const picks = drawUpgrades(this.rng, 3, this.ownedCounts, this.boonPool);
-    const costBase = { common: 8, rare: 14, epic: 22, legendary: 35 };
-    const discount = 1 - Math.min(0.5, this.player.stats.shopDiscount);
-    this.shopItems = picks.map((u) => ({
-      upgrade: u,
-      cost: Math.max(1, Math.round(costBase[u.rarity] * (1 + (this.floor - 1) * 0.3) * discount)),
-      bought: false,
-    }));
     this._setState(GAME_STATE.UPGRADE);
   }
 
   _buyShopItem(item) {
-    if (item.bought || this.player.gold < item.cost) { this.audio.play('ui'); return; }
-    this.player.gold -= item.cost;
-    item.bought = true;
+    if (item.bought) { this.audio.play('ui'); return; }
+    const price = this._shopPrice(item.basePrice);
+    if (this.player.gold < price) { this.audio.play('ui'); return; }
+    this.player.gold -= price;
+    item.bought = true; // persisted on room.shopInventory — stays sold on reopen
     this._applyUpgrade(item.upgrade);
     this.audio.play('pickup');
+  }
+
+  // One paid reroll per shop: refills only the unpurchased slots, keeps sold
+  // ones sold, then locks out further rerolls for this shop.
+  _rerollShop() {
+    const inv = this.currentRoom && this.currentRoom.shopInventory;
+    if (!inv || inv.rerolled) return;
+    const cost = this._rerollCost();
+    if (this.player.gold < cost) { this.audio.play('ui'); return; }
+    this.player.gold -= cost;
+    inv.rerolled = true;
+    const openSlots = inv.items.filter((it) => !it.bought).length;
+    const fresh = this._genShopItems(inv.pool, inv.costBase, inv.bias, openSlots);
+    let fi = 0;
+    inv.items = inv.items.map((it) => (it.bought ? it : (fresh[fi++] || it)));
+    this.shopItems = inv.items;
+    this.audio.play('uiconfirm');
   }
 
   _closeShop() {

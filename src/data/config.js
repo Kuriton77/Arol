@@ -46,6 +46,14 @@ export const CONFIG = Object.freeze({
     minRooms: 10,
     maxRooms: 14,
   },
+  shop: {
+    items: 3,                    // slots per shop
+    rerollCost: 75,              // base reroll cost (scales with price multiplier)
+    priceLevelMultiplier: 1.10,  // +10% to all prices per player level, compounding
+    // Base prices by rarity; displayed price = base × multiplier(level) × discount.
+    costBase: { common: 8, rare: 14, epic: 22, legendary: 35 },
+    relicCostBase: { common: 22, rare: 32, epic: 48, legendary: 75 },
+  },
   audio: {
     master: 0.6,
     music: 0.4,

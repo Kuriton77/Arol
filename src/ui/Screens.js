@@ -1,6 +1,6 @@
 // Full-screen overlay screens (menu, boon/shop selection, pause, game over,
 // victory). Uses the immediate-mode UI helper; reads/mutates Game via methods.
-import { GAME_STATE } from '../data/config.js';
+import { GAME_STATE, CONFIG } from '../data/config.js';
 import {
   META_TREE, MASTERY_THRESHOLDS, MASTERY_PERKS, masteryLevel,
   SMITH_MAX, SMITH_COSTS, ACHIEVEMENTS,
@@ -298,8 +298,12 @@ export class Screens {
     const title = shop ? 'SHOP' : g.choiceSource === 'relic' ? 'CHOOSE A RELIC' : 'CHOOSE A BOON';
     ui.text(title, this.W / 2, 78,
       { font: 'bold 34px "Trebuchet MS", system-ui', align: 'center', color: g.choiceSource === 'relic' && !shop ? '#ffd9a0' : '#eaf1ff', shadow: true });
-    if (shop) ui.text(`◆ ${g.player.gold} gold`, this.W / 2, 108, { font: 'bold 18px system-ui', align: 'center', color: '#ffd23f' });
-    else ui.text('press 1 · 2 · 3 or click', this.W / 2, 108, { font: '14px system-ui', align: 'center', color: '#8fa4cc' });
+    if (shop) {
+      ui.text(`◆ ${g.player.gold} gold`, this.W / 2, 106, { font: 'bold 18px system-ui', align: 'center', color: '#ffd23f' });
+      const mult = Math.pow(CONFIG.shop.priceLevelMultiplier, g.player.level - 1);
+      ui.text(`Lv ${g.player.level} · prices ×${mult.toFixed(2)}`, this.W / 2, 126,
+        { font: '12px system-ui', align: 'center', color: '#8fa4cc' });
+    } else ui.text('press 1 · 2 · 3 or click', this.W / 2, 108, { font: '14px system-ui', align: 'center', color: '#8fa4cc' });
 
     const cardW = 260, cardH = 300, gap = 30;
     const total = items.length * cardW + (items.length - 1) * gap;
@@ -333,8 +337,10 @@ export class Screens {
       this._wrap(u.desc, x + cardW / 2, y0 + 186, cardW - 40, 18, { align: 'center', color: '#c3cee6', font: '14px system-ui' });
 
       if (shop) {
-        const affordable = !it.bought && g.player.gold >= it.cost;
-        const label = it.bought ? 'PURCHASED' : `Buy — ${it.cost}◆`;
+        // Price is derived live from the base price and the player's level.
+        const price = g._shopPrice(it.basePrice);
+        const affordable = !it.bought && g.player.gold >= price;
+        const label = it.bought ? 'PURCHASED' : `Buy — ${price}◆`;
         if (ui.button(x + 30, y0 + cardH - 52, cardW - 60, 38, label, {
           color: it.bought ? '#2a3a2f' : affordable ? '#7a5a1f' : '#3a3a2a',
           hoverColor: affordable ? '#a87d2c' : '#3a3a2a',
@@ -352,7 +358,19 @@ export class Screens {
         if (inp.wasPressed(String(i + 1))) { g._pickUpgrade(items[i]); break; }
       }
     } else {
-      if (ui.button(this.W / 2 - 90, y0 + cardH + 30, 180, 44, 'Leave Shop', { color: '#3a3a4a', hoverColor: '#4a4a5f' })) g._closeShop();
+      // Reroll (one per shop) + Leave.
+      const inv = g.currentRoom && g.currentRoom.shopInventory;
+      const rerolled = inv ? inv.rerolled : true;
+      const rcost = g._rerollCost();
+      const canReroll = !rerolled && g.player.gold >= rcost;
+      const rlabel = rerolled ? 'Reroll used' : (g.player.gold >= rcost ? `Reroll — ${rcost}◆` : `Need ${rcost}◆`);
+      if (ui.button(this.W / 2 - 200, y0 + cardH + 30, 190, 44, rlabel, {
+        color: canReroll ? '#5a3a7a' : '#2a2a38',
+        hoverColor: canReroll ? '#7a52a8' : '#2a2a38',
+        stroke: canReroll ? undefined : 'rgba(90,100,130,0.4)',
+        textColor: canReroll ? '#f0f3fb' : '#6a7590',
+      }) && canReroll) g._rerollShop();
+      if (ui.button(this.W / 2 + 10, y0 + cardH + 30, 190, 44, 'Leave Shop', { color: '#3a3a4a', hoverColor: '#4a4a5f' })) g._closeShop();
     }
   }
 
