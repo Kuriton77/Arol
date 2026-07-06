@@ -149,17 +149,18 @@ const PATTERNS = {
 };
 
 export class Boss extends Entity {
-  constructor(x, y, def, depth = 0) {
+  // `scale` is a { hp, damage } multiplier bundle from the DifficultyManager.
+  // Defaults to identity so the boss can be constructed standalone.
+  constructor(x, y, def, scale = { hp: 1, damage: 1 }) {
     super(x, y, def.radius);
     this.def = def;
-    const scale = 1 + depth * 0.15;
-    this.maxHealth = Math.round(def.health * scale);
+    this.maxHealth = Math.round(def.health * (scale.hp ?? 1));
     this.health = this.maxHealth;
     this.speed = def.speed;
     this.color = def.color;
     this.accent = def.accent;
-    this.contactDamage = def.contactDamage * scale;
-    this.projDamage = Math.round(12 * scale);
+    this.contactDamage = def.contactDamage * (scale.damage ?? 1);
+    this.projDamage = Math.round(12 * (scale.damage ?? 1));
     this.knockbackResist = 0.85;
     this.isBossEntity = true; // excluded from execute/stun effects
 

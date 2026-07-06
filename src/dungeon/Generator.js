@@ -5,7 +5,7 @@ import { Room, DIRS } from './Room.js';
 import { ROOM, CONFIG } from '../data/config.js';
 import { EVENTS } from '../data/events.js';
 
-export function generateDungeon(seed, depthLevel = 0, biome = null) {
+export function generateDungeon(seed, depthLevel = 0, biome = null, spawnMult = 1) {
   const rng = seed;               // a mulberry32 rng from makeRng
   const count = rng.int(CONFIG.dungeon.minRooms, CONFIG.dungeon.maxRooms);
 
@@ -78,7 +78,7 @@ export function generateDungeon(seed, depthLevel = 0, biome = null) {
   }
 
   // Build encounter / reward plans + biome dressing.
-  for (const r of rooms) buildRoomContent(r, rng, depthLevel, biome);
+  for (const r of rooms) buildRoomContent(r, rng, depthLevel, biome, spawnMult);
 
   return { rooms, byId, start, boss, grid };
 }
@@ -99,8 +99,10 @@ function computeDepths(start, byId) {
   }
 }
 
-function buildRoomContent(room, rng, depthLevel, biome) {
-  const d = room.depth + depthLevel * 4; // scale with both room depth and floor
+function buildRoomContent(room, rng, depthLevel, biome, spawnMult = 1) {
+  // `d` drives roster gating + base intra-floor count growth; the difficulty
+  // system's spawn multiplier scales the final enemy budget on top.
+  const d = room.depth + depthLevel * 4;
   const allowed = biome ? biome.enemies : null;
 
   // Biome dressing: decorations everywhere, hazards only in fights.
@@ -113,12 +115,12 @@ function buildRoomContent(room, rng, depthLevel, biome) {
 
   switch (room.type) {
     case ROOM.COMBAT: {
-      const budget = 3 + Math.floor(d * 0.8);
+      const budget = Math.max(2, Math.round((3 + d * 0.8) * spawnMult));
       room.enemyPlan = planEnemies(rng, budget, false, d, allowed);
       break;
     }
     case ROOM.ELITE: {
-      const budget = 4 + Math.floor(d * 0.9);
+      const budget = Math.max(3, Math.round((4 + d * 0.9) * spawnMult));
       room.enemyPlan = planEnemies(rng, budget, true, d, allowed);
       break;
     }

@@ -23,6 +23,7 @@ import { biomeForFloor } from '../data/biomes.js';
 import { eventById } from '../data/events.js';
 import { pactMods, totalHeat, SOUL_BONUS_PER_HEAT, HEAT_MILESTONES } from '../data/pacts.js';
 import { SynergySystem } from '../systems/SynergySystem.js';
+import { DifficultyManager, DEFAULT_DIFFICULTY } from '../systems/DifficultyManager.js';
 import { Hazards } from '../fx/Hazards.js';
 import { Renderer } from '../render/Renderer.js';
 import { HUD } from '../ui/HUD.js';
@@ -78,6 +79,8 @@ export class Game {
     this.choiceSource = 'boon';
     this.ownedTags = {};       // synergy tag counts
     this.synergy = new SynergySystem(this);
+    // Single source of truth for difficulty × floor × modifier scaling.
+    this.difficulty = new DifficultyManager(this.save.data.difficulty || DEFAULT_DIFFICULTY);
     this.shopMode = false;
     this.shopItems = null;
     this.eventResult = null;
@@ -144,6 +147,9 @@ export class Game {
     this.upgradeQueue = [];
     this.synergy.reset();
 
+    // Lock in the chosen difficulty for this run and reset run-scoped modifiers.
+    this.difficulty.setDifficulty(this.save.data.difficulty || DEFAULT_DIFFICULTY).clearModifiers();
+
     const weapon = weaponById(this.save.data.selectedWeapon);
     this.player = new Player(CONFIG.world.width / 2, CONFIG.world.height / 2, weapon);
     // Boon pool for this run = shared upgrades + the equipped weapon's pool.
@@ -189,10 +195,12 @@ export class Game {
     const seed = (Date.now() ^ (this.floor * 2654435761)) >>> 0;
     this.rng = makeRng(seed);
     if (this.player) this.player.stats.secondWindUsed = false; // once per floor
-    this.spawnSystem = new SpawnSystem(this.rng);
+    // Advance the difficulty manager to this floor before anything scales.
+    this.difficulty.setFloor(this.floor);
+    this.spawnSystem = new SpawnSystem(this.rng, this.difficulty);
     this.biome = biomeForFloor(this.floor);
     this.bossDef = bossById(this.biome.bossId);
-    this.dungeon = generateDungeon(this.rng, this.floor - 1, this.biome);
+    this.dungeon = generateDungeon(this.rng, this.floor - 1, this.biome, this.difficulty.spawnMultiplier());
     this._ambientT = 0;
     this.floorTime = 0;
     this._hourglassTriggered = false;
@@ -542,7 +550,8 @@ export class Game {
 
   // ----------------------------------------------------------------- kills/end
   _onKilled(target) {
-    const greed = 1 + (this.player.stats.greed || 0);
+    // Reward multipliers: player boons (greed / xpMult) × difficulty scaling.
+    const greed = (1 + (this.player.stats.greed || 0)) * this.difficulty.goldMult();
     this.particles.burst(target.x, target.y, target.color || '#fff', 16, { speed: 260, life: 0.6 });
     this.camera.addShake(target === this.boss ? 12 : 5);
     this.audio.play('die');
@@ -554,7 +563,7 @@ export class Game {
     if (s.killSpeed > 0) s.killSpeedT = 2.0;
     if (s.healOnKill > 0) this.player.heal(s.healOnKill);
     this.synergy.onKill(target);
-    const xpBoost = 1 + s.xpMult;
+    const xpBoost = (1 + s.xpMult) * this.difficulty.xpMult();
 
     if (target === this.boss) {
       this.player.gold += Math.round(target.def.gold * greed);

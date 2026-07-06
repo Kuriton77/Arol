@@ -7,8 +7,15 @@ import { ENEMY_TYPES } from '../data/enemies.js';
 import { CONFIG } from '../data/config.js';
 import { dist } from '../core/math.js';
 
+// Identity scaling used when no DifficultyManager is supplied (standalone use).
+const IDENTITY = { enemyScale: () => ({ hp: 1, damage: 1, speed: 1 }), bossScale: () => ({ hp: 1, damage: 1 }), eliteChance: () => 0 };
+
 export class SpawnSystem {
-  constructor(rng) { this.rng = rng; }
+  // `difficulty` is a DifficultyManager; all stat scaling is sourced from it.
+  constructor(rng, difficulty = null) {
+    this.rng = rng;
+    this.difficulty = difficulty || IDENTITY;
+  }
 
   // Returns { enemies, boss } for the given room.
   spawnRoom(room, depthLevel, player, bossDef = null) {
@@ -18,24 +25,27 @@ export class SpawnSystem {
 
     for (const group of room.enemyPlan) {
       if (group.type === 'boss') {
-        boss = new Boss(b.w / 2, b.h * 0.32, bossDef, depthLevel);
+        boss = new Boss(b.w / 2, b.h * 0.32, bossDef, this.difficulty.bossScale());
         continue;
       }
-      enemies.push(...this.spawnPlan([group], b, player, room.depth + depthLevel * 4));
+      enemies.push(...this.spawnPlan([group], b, player));
     }
     return { enemies, boss };
   }
 
   // Instantiate a [{type, count, elite}] plan at safe positions (rooms, events).
-  spawnPlan(plan, bounds, player, depth = 0) {
+  // Elite status comes from the plan (designated groups) or a difficulty roll.
+  spawnPlan(plan, bounds, player) {
     const out = [];
+    const scale = this.difficulty.enemyScale();
+    const eliteChance = this.difficulty.eliteChance();
     for (const group of plan) {
       const def = ENEMY_TYPES[group.type];
       if (!def) continue;
       for (let i = 0; i < group.count; i++) {
         const pos = this._safePos(bounds, player);
-        const e = new Enemy(pos.x, pos.y, def, depth);
-        if (group.elite) e.makeElite();
+        const e = new Enemy(pos.x, pos.y, def, scale);
+        if (group.elite || (eliteChance > 0 && this.rng.chance(eliteChance))) e.makeElite();
         out.push(e);
       }
     }
@@ -43,21 +53,20 @@ export class SpawnSystem {
   }
 
   // Spawn a specific archetype at an exact position (summons, events, mimics).
-  spawnAt(type, x, y, bounds, depthLevel = 0) {
+  spawnAt(type, x, y, bounds) {
     const def = ENEMY_TYPES[type] || ENEMY_TYPES.melee;
     const pad = CONFIG.world.roomPadding + def.radius;
-    const e = new Enemy(
+    return new Enemy(
       Math.min(bounds.x + bounds.w - pad, Math.max(bounds.x + pad, x)),
       Math.min(bounds.y + bounds.h - pad, Math.max(bounds.y + pad, y)),
-      def, depthLevel * 4,
+      def, this.difficulty.enemyScale(),
     );
-    return e;
   }
 
   spawnAdd(boss, bounds, player, type = 'melee') {
     const def = ENEMY_TYPES[type] || ENEMY_TYPES.melee;
     const pos = this._safePos(bounds, player);
-    const e = new Enemy(pos.x, pos.y, def, 2);
+    const e = new Enemy(pos.x, pos.y, def, this.difficulty.enemyScale());
     e.spawnedByBoss = true;
     return e;
   }

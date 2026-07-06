@@ -422,6 +422,10 @@ assert(metaPhase.earned >= 2, `achievements are granted (${metaPhase.earned})`);
 const pactPhase = await page.evaluate(async () => {
   const g = window.__AROL__;
   const { PACTS, totalHeat, pactMods } = await import('./src/data/pacts.js');
+  // Isolate from earlier phases: clear meta nodes (Fated grants a random boon
+  // that would perturb the baseline max-health comparison) and difficulty.
+  g.save.data.metaNodes = {};
+  g.save.data.difficulty = 'normal';
   // Baseline run for comparison.
   g.save.data.pacts = {};
   g.startRun();
@@ -465,6 +469,64 @@ assert(pactPhase.gained >= pactPhase.expectedMin, `heat multiplies souls + miles
 assert(pactPhase.milestones.length === 3, 'heat-9 win claims all three milestones');
 // Reset pacts so later reloads start clean.
 await page.evaluate(() => { const g = window.__AROL__; g.save.data.pacts = {}; g.save.save(); });
+
+// --- Difficulty Manager: tiers scale, floors compound, modifiers plug in ---
+const diffPhase = await page.evaluate(async () => {
+  const g = window.__AROL__;
+  const { DifficultyManager, DIFFICULTIES, FLOOR_RATES, MODIFIERS, difficultyById } =
+    await import('./src/systems/DifficultyManager.js');
+
+  // 1. Tier multipliers match the spec table.
+  const table = { easy: 0.75, normal: 1.0, hard: 1.3, nightmare: 1.6, inferno: 2.0 };
+  const tiersOk = DIFFICULTIES.every((d) => Math.abs(d.mult - table[d.id]) < 1e-9);
+
+  // 2. Floor scaling compounds off the base multiplier.
+  const dm = new DifficultyManager('normal');
+  dm.setFloor(1);
+  const f1 = dm.snapshot();
+  dm.setFloor(11); // +10 floors
+  const f11 = dm.snapshot();
+  const floorHpOk = Math.abs(f11.hp - (1 + FLOOR_RATES.hp * 10)) < 1e-9; // +50%
+  const floorDmgOk = Math.abs(f11.damage - (1 + FLOOR_RATES.damage * 10)) < 1e-9;
+
+  // 3. Difficulty × floor stacks multiplicatively.
+  const inf = new DifficultyManager('inferno').setFloor(11);
+  const stackOk = Math.abs(inf.mult('hp') - 2.0 * (1 + FLOOR_RATES.hp * 10)) < 1e-6;
+
+  // 4. Missing/unknown difficulty falls back to Normal.
+  const fallbackOk = difficultyById('nonexistent').id === 'normal'
+    && new DifficultyManager('garbage').def.id === 'normal';
+
+  // 5. Pluggable modifier changes the relevant stat only.
+  const mod = new DifficultyManager('normal').setFloor(1);
+  const goldBefore = mod.goldMult();
+  mod.addModifier(MODIFIERS.greed);
+  const greedOk = Math.abs(mod.goldMult() - goldBefore * 1.5) < 1e-9 && Math.abs(mod.mult('hp') - 1) < 1e-9;
+
+  // 6. End-to-end: harder tier produces tougher enemies + more reward in-game.
+  g.save.data.difficulty = 'easy'; g.startRun();
+  const easyRoom = g.dungeon.rooms.find((r) => r.type === 'combat');
+  g._enterRoom(easyRoom, null, false);
+  const easyHp = g.enemies.length ? g.enemies[0].maxHealth / g.enemies[0].def.health : 1;
+  g.save.data.difficulty = 'inferno'; g.startRun();
+  const infRoom = g.dungeon.rooms.find((r) => r.type === 'combat');
+  g._enterRoom(infRoom, null, false);
+  const infHp = g.enemies.length ? g.enemies[0].maxHealth / g.enemies[0].def.health : 1;
+  // Ratios use rounded integer HP, so allow a small rounding tolerance.
+  const scalingOk = infHp > easyHp && Math.abs(easyHp - 0.75) < 0.03 && Math.abs(infHp - 2.0) < 0.03;
+
+  // 7. Save default: a save without a difficulty field defaults to Normal.
+  g.save.data.difficulty = 'normal'; g.save.save();
+
+  return { tiersOk, floorHpOk, floorDmgOk, stackOk, fallbackOk, greedOk, scalingOk, easyHp, infHp, f11hp: f11.hp };
+});
+console.log('  difficulty phase:', JSON.stringify(diffPhase));
+assert(diffPhase.tiersOk, 'difficulty tiers match spec (0.75/1.0/1.3/1.6/2.0)');
+assert(diffPhase.floorHpOk && diffPhase.floorDmgOk, `floor scaling compounds (+50% HP at floor 11 = ${diffPhase.f11hp})`);
+assert(diffPhase.stackOk, 'difficulty × floor stack multiplicatively');
+assert(diffPhase.fallbackOk, 'unknown/missing difficulty falls back to Normal');
+assert(diffPhase.greedOk, 'pluggable modifier scales only its target stat');
+assert(diffPhase.scalingOk, `Easy (×${diffPhase.easyHp}) < Inferno (×${diffPhase.infHp}) enemy HP in-game`);
 
 console.log('\nConsole errors:', errors.length);
 errors.slice(0, 20).forEach((e) => console.log('  !', e));

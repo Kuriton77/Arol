@@ -12,6 +12,7 @@ const DEFAULT = {
   metaNodes: {},          // skill-tree nodeId -> 1
   unlockedWeapons: ['sword'],
   selectedWeapon: 'sword',
+  difficulty: 'normal',   // chosen tier; missing on old saves → Normal via merge
   weaponMastery: {},      // weaponId -> { kills }
   smith: {},              // weaponId -> forge level
   achievements: [],       // earned achievement ids

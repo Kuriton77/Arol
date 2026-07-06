@@ -256,17 +256,18 @@ const BEHAVIOURS = {
 };
 
 export class Enemy extends Entity {
-  constructor(x, y, def, depth = 0) {
+  // `scale` is a { hp, damage, speed } multiplier bundle from the
+  // DifficultyManager (difficulty × floor × modifiers). Defaults to identity so
+  // the entity can still be constructed standalone (tests, tooling).
+  constructor(x, y, def, scale = { hp: 1, damage: 1, speed: 1 }) {
     super(x, y, def.radius);
     this.def = def;
     this.ai = def.ai;
-    // Depth scaling keeps later floors threatening without new data.
-    const hpScale = 1 + depth * 0.18;
-    const dmgScale = 1 + depth * 0.12;
-    this.maxHealth = Math.round(def.health * hpScale);
+    // All floor/difficulty scaling comes from the DifficultyManager.
+    this.maxHealth = Math.round(def.health * (scale.hp ?? 1));
     this.health = this.maxHealth;
-    this.damage = def.damage * dmgScale;
-    this.speed = def.speed;
+    this.damage = def.damage * (scale.damage ?? 1);
+    this.speed = def.speed * (scale.speed ?? 1);
     this.knockbackResist = def.knockbackResist || 0;
     this.color = def.color;
     this.accent = def.accent;

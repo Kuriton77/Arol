@@ -8,6 +8,7 @@ import {
 import { WEAPONS } from '../data/weapons.js';
 import { RARITY } from '../data/upgrades.js';
 import { PACTS, totalHeat, SOUL_BONUS_PER_HEAT, HEAT_MILESTONES } from '../data/pacts.js';
+import { DIFFICULTIES, difficultyById } from '../systems/DifficultyManager.js';
 import { roundRect } from './UI.js';
 
 const TABS = [
@@ -130,28 +131,54 @@ export class Screens {
       y += 49;
     }
 
-    // Start + stats (right).
-    if (ui.button(this.W / 2 - 20, 200, 340, 64, '▶  START RUN', { font: 'bold 24px system-ui', color: '#2f6f4f', hoverColor: '#3f9968' })) {
+    // Difficulty selector (right column). Normal is preselected via the save
+    // default; the chosen tier is stored and used by the next run.
+    const rx = this.W / 2 - 20, rw = 476;
+    ui.panel(rx, 150, rw, 92);
+    ui.text('DIFFICULTY', rx + 16, 174, { font: 'bold 14px system-ui', color: '#9fb2dd' });
+    const selId = g.save.data.difficulty || 'normal';
+    const bw = 84, gap = 8, dtot = DIFFICULTIES.length * bw + (DIFFICULTIES.length - 1) * gap;
+    const dx0 = rx + (rw - dtot) / 2;
+    DIFFICULTIES.forEach((d, i) => {
+      const active = d.id === selId;
+      if (ui.button(dx0 + i * (bw + gap), 184, bw, 32, d.name, {
+        color: active ? '#2a3350' : '#1a1f30',
+        hoverColor: active ? '#2a3350' : '#28304e',
+        stroke: active ? d.color : 'rgba(120,140,200,0.3)',
+        textColor: active ? d.color : '#aab8d6',
+        font: 'bold 12px system-ui',
+      })) {
+        g.save.data.difficulty = d.id;
+        g.save.save();
+        g.audio.play('ui');
+      }
+    });
+    const selDef = difficultyById(selId);
+    ui.text(`×${selDef.mult.toFixed(2)} enemy scaling — ${selDef.desc}`, rx + rw / 2, 230,
+      { font: '12px system-ui', align: 'center', color: selDef.color });
+
+    // Start.
+    if (ui.button(rx, 258, rw, 58, '▶  START RUN', { font: 'bold 24px system-ui', color: '#2f6f4f', hoverColor: '#3f9968' })) {
       g.audio.resume();
       g.startRun();
     }
     const heat = totalHeat(g.save.data.pacts);
     if (heat > 0) {
       ui.text(`🔥 Heat ${heat} — souls +${Math.round(heat * SOUL_BONUS_PER_HEAT * 100)}%`,
-        this.W / 2 + 150, 282, { font: 'bold 13px system-ui', align: 'center', color: '#ff9a5a' });
+        rx + rw / 2, 332, { font: 'bold 13px system-ui', align: 'center', color: '#ff9a5a' });
     }
     const st = g.save.data.stats;
-    ui.panel(this.W / 2 - 20, 290, 340, 130);
-    ui.text('CHRONICLE', this.W / 2, 316, { font: 'bold 13px system-ui', color: '#9fb2dd' });
+    ui.panel(rx, 344, rw, 118);
+    ui.text('CHRONICLE', rx + rw / 2, 368, { font: 'bold 13px system-ui', align: 'center', color: '#9fb2dd' });
     const lines = [
       `Runs ${st.runs}   ·   Wins ${st.wins}`,
       `Kills ${st.kills}   ·   Best Floor ${st.bestDepth}`,
       `Lifetime souls ${st.lifetimeSouls}   ·   Feats ${g.save.data.achievements.length}/${ACHIEVEMENTS.length}`,
     ];
-    lines.forEach((ln, i) => ui.text(ln, this.W / 2 + 150, 344 + i * 24, { font: '13px system-ui', align: 'center', color: '#aab8d6' }));
+    lines.forEach((ln, i) => ui.text(ln, rx + rw / 2, 392 + i * 22, { font: '13px system-ui', align: 'center', color: '#aab8d6' }));
 
     ui.text('WASD / Arrows move  ·  Mouse aim  ·  Click attack  ·  Space dash  ·  Esc pause  ·  M mute',
-      this.W / 2, this.H - 26, { font: '12px system-ui', align: 'center', color: '#66759a' });
+      this.W / 2, this.H - 20, { font: '12px system-ui', align: 'center', color: '#66759a' });
   }
 
   // Skill tree: three branches, nodes unlock top-to-bottom.
