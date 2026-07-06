@@ -727,6 +727,14 @@ const uiScalePhase = await page.evaluate(async () => {
   const expectedMx = cx + 100 / 1.5;
   const mouseOk = Math.abs(g.ui.mx - expectedMx) < 0.01;
 
+  // Presentation scaling: the stage (canvas container) itself resizes.
+  const stage = document.getElementById('stage');
+  sm.set('uiScale', 0.75);
+  const w75 = parseInt(stage.style.width, 10);
+  sm.set('uiScale', 1.0);
+  const w100 = parseInt(stage.style.width, 10);
+  const presentationOk = w100 > w75 && w75 > 0;
+
   // Persistence across instances.
   sm.set('uiScale', 1.75);
   const persisted = new SettingsManager().get('uiScale') === 1.75;
@@ -735,7 +743,7 @@ const uiScalePhase = await page.evaluate(async () => {
   sm.reset();
   const resetOk = g.ui.scale === 1.0 && sm.get('uiScale') === 1.0;
 
-  return { defaultOk, snapOk, snapped, clampOk, liveOk, mouseOk, persisted, resetOk,
+  return { defaultOk, snapOk, snapped, clampOk, liveOk, mouseOk, persisted, resetOk, presentationOk, w75, w100,
            category: schema && schema.category };
 });
 console.log('  ui-scale phase:', JSON.stringify(uiScalePhase));
@@ -744,6 +752,7 @@ assert(uiScalePhase.snapOk, `UI Scale snaps to 25% steps (1.37 → ${uiScalePhas
 assert(uiScalePhase.clampOk, 'UI Scale clamps to the 200% ceiling');
 assert(uiScalePhase.liveOk, 'UI Scale updates the shared scale in real time');
 assert(uiScalePhase.mouseOk, 'mouse coords remap by scale so hit-testing stays aligned');
+assert(uiScalePhase.presentationOk, `UI Scale resizes the whole presentation (${uiScalePhase.w75}px @75% → ${uiScalePhase.w100}px @100%)`);
 assert(uiScalePhase.persisted, 'UI Scale persists across launches');
 assert(uiScalePhase.resetOk, 'reset restores UI Scale to 100%');
 assert(uiScalePhase.category === 'Interface', 'UI Scale lives in an Interface category (accessibility-ready)');

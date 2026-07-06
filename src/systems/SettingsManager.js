@@ -31,7 +31,11 @@ export const SETTINGS_SCHEMA = [
   // Opacity/Position…) drop in here as additional schema entries.
   { id: 'uiScale', category: 'Interface', label: 'UI Scale', type: 'slider',
     default: 1.0, min: 0.75, max: 2.0, step: 0.25, format: 'percent',
-    apply: (v, ctx) => { if (ctx.game.ui) ctx.game.ui.setScale(v); } },
+    apply: (v, ctx) => {
+      // Scales the entire presentation (canvas + everything drawn in it).
+      if (ctx.game.setPresentationScale) ctx.game.setPresentationScale(v);
+      else if (ctx.game.ui) ctx.game.ui.setScale(Math.max(1, v));
+    } },
 
   // --- Visuals (demonstrates the toggle path; more can be added freely) ---
   { id: 'screenShake', category: 'Visuals', label: 'Screen Shake', type: 'toggle', default: true,
