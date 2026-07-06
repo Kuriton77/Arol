@@ -19,6 +19,7 @@ import { META_UPGRADES } from '../data/meta.js';
 import { WEAPONS, weaponById } from '../data/weapons.js';
 import { bossById } from '../data/bosses.js';
 import { biomeForFloor } from '../data/biomes.js';
+import { eventById } from '../data/events.js';
 import { SynergySystem } from '../systems/SynergySystem.js';
 import { Hazards } from '../fx/Hazards.js';
 import { Renderer } from '../render/Renderer.js';
@@ -192,6 +193,8 @@ export class Game {
     this.projectiles.clear();
     this.isBossRoom = room.type === ROOM.BOSS;
     this.prompt = null;
+    this.eventFight = null;
+    this.currentEvent = null;
 
     // Place the player just inside the entry door (or centre on first spawn).
     if (entryDir) {
@@ -360,9 +363,92 @@ export class Game {
     } else if (room.reward.kind === 'shop') {
       this._openShop();
     } else if (room.reward.kind === 'event') {
-      room.rewardTaken = true;
-      this._applyEvent(room.reward.variant);
+      // Snoozed events reopen once the player steps away and returns.
+      if (room._eventSnoozed) return;
+      this.currentEvent = eventById(room.reward.variant);
+      this._setState(GAME_STATE.EVENT);
+      this.audio.play('ui');
     }
+  }
+
+  // Resolve a chosen event option (or leave). Options may award instantly,
+  // open a shop, or start an event fight whose reward pays on clear.
+  _eventChoose(opt) {
+    const room = this.currentRoom;
+    this.currentEvent = null;
+    if (!opt) {
+      // Leave without committing — the event stays available.
+      room._eventSnoozed = true;
+      this._setState(GAME_STATE.PLAYING);
+      return;
+    }
+    room.rewardTaken = true;
+    const result = opt.run(this);
+    // run() may have changed state (shop/upgrade). Only unfreeze if it didn't.
+    if (this.state === GAME_STATE.EVENT) this._setState(GAME_STATE.PLAYING);
+    if (this.state === GAME_STATE.PLAYING && this.upgradeQueue.length) this._openNextUpgrade();
+    if (result) {
+      this.prompt = result;
+      const expected = result;
+      setTimeout(() => { if (this.prompt === expected) this.prompt = null; }, 3500);
+    }
+  }
+
+  // Lock the room and spawn an event encounter; reward resolves on clear.
+  _startEventFight(plan, reward) {
+    const room = this.currentRoom;
+    room.locked = true;
+    this.eventFight = { ...reward, timeLeft: reward.timeLimit || 0 };
+    this.enemies.push(...this.spawnSystem.spawnPlan(plan, room.bounds, this.player, room.depth + (this.floor - 1) * 4));
+    this.audio.setMood('combat');
+  }
+
+  _resolveEventFight(success) {
+    const f = this.eventFight;
+    this.eventFight = null;
+    this.currentRoom.locked = false;
+    this._exploreMood();
+    if (!success) {
+      this.prompt = 'The trial is failed. The dust settles.';
+      return;
+    }
+    const greed = 1 + (this.player.stats.greed || 0);
+    switch (f.kind) {
+      case 'prisoner': {
+        const gold = Math.round(80 * greed);
+        this.player.gold += gold;
+        this.player.heal(Math.round(this.player.maxHealth * 0.3));
+        this.prompt = `The prisoner presses ${gold} gold into your hands and flees.`;
+        this.audio.play('pickup');
+        break;
+      }
+      case 'mirror':
+        this.prompt = 'The shadow shatters. Something real remains.';
+        this._queueUpgrades(1, 'relic');
+        break;
+      case 'timed':
+        this.prompt = 'The hourglass stills. The trial is won.';
+        this._queueUpgrades(1, 'relic');
+        break;
+      case 'mimic':
+        this.prompt = 'The mimic dissolves into loose coins.';
+        this.audio.play('pickup');
+        break;
+    }
+  }
+
+  // Hidden-merchant variant of the shop: relic stock at premium prices.
+  _openRelicShop() {
+    this.shopMode = true;
+    const picks = drawUpgrades(this.rng, 3, this.ownedCounts, RELICS, this.biome ? this.biome.lootBias : null);
+    const costBase = { common: 22, rare: 32, epic: 48, legendary: 75 };
+    const discount = 1 - Math.min(0.5, this.player.stats.shopDiscount);
+    this.shopItems = picks.map((u) => ({
+      upgrade: u,
+      cost: Math.max(1, Math.round(costBase[u.rarity] * (1 + (this.floor - 1) * 0.25) * discount)),
+      bought: false,
+    }));
+    this._setState(GAME_STATE.UPGRADE);
   }
 
   _openShop() {
@@ -394,37 +480,6 @@ export class Game {
     this._setState(GAME_STATE.PLAYING);
   }
 
-  _applyEvent(variant) {
-    const p = this.player;
-    if (variant === 'heal') {
-      const amt = Math.round(p.maxHealth * 0.4);
-      p.heal(amt);
-      this.eventResult = `A soothing light restores ${amt} HP.`;
-      this.audio.play('levelup');
-    } else if (variant === 'gamble') {
-      if (this.rng.chance(0.55)) {
-        const g = 25 + this.floor * 10;
-        p.gold += g;
-        this.eventResult = `Fortune favours you! +${g} gold.`;
-        this.audio.play('pickup');
-      } else {
-        const dmg = Math.round(p.maxHealth * 0.2);
-        p.health = Math.max(1, p.health - dmg);
-        this.eventResult = `The dice betray you... -${dmg} HP.`;
-        this.audio.play('hurt');
-      }
-    } else if (variant === 'sacrifice') {
-      p.stats.maxHealthBonus -= 15;
-      p.refreshMaxHealth();
-      const epics = UPGRADES.filter((u) => u.rarity === 'epic' || u.rarity === 'legendary');
-      const boon = epics[this.rng.int(0, epics.length - 1)];
-      this._applyUpgrade(boon);
-      this.eventResult = `You trade vitality for power: ${boon.name}!`;
-      this.audio.play('levelup');
-    }
-    this.prompt = this.eventResult;
-    setTimeout(() => { if (this.prompt === this.eventResult) this.prompt = null; }, 3200);
-  }
 
   // ----------------------------------------------------------------- kills/end
   _onKilled(target) {
@@ -507,6 +562,7 @@ export class Game {
       case GAME_STATE.PLAYING: this._updatePlaying(dt); break;
       case GAME_STATE.MENU:
       case GAME_STATE.UPGRADE:
+      case GAME_STATE.EVENT:
       case GAME_STATE.PAUSED:
       case GAME_STATE.GAMEOVER:
       case GAME_STATE.VICTORY:
@@ -648,6 +704,22 @@ export class Game {
     this.damageNumbers.update(dt);
     this.camera.update(dt);
 
+    // --- event fights (rooms that aren't needsClearing) ---
+    if (this.eventFight) {
+      this.enemies = this.enemies.filter((e) => e.alive);
+      if (this.eventFight.timeLimit) {
+        this.eventFight.timeLeft -= dt;
+        this.prompt = `⏳ ${Math.max(0, Math.ceil(this.eventFight.timeLeft))}s — ${this.enemies.length} challengers remain`;
+        if (this.eventFight.timeLeft <= 0) this._resolveEventFight(false);
+      }
+      if (this.eventFight && this.enemies.length === 0) this._resolveEventFight(true);
+    }
+    // Release snoozed events once the player steps away from the sigil.
+    if (this.currentRoom && this.currentRoom._eventSnoozed) {
+      const dx = p.x - this.currentRoom.bounds.w / 2, dy = p.y - this.currentRoom.bounds.h / 2;
+      if (dx * dx + dy * dy > 80 * 80) this.currentRoom._eventSnoozed = false;
+    }
+
     // --- world checks ---
     this._checkRoomClear();
     this._tryTransition();
@@ -690,7 +762,7 @@ export class Game {
     c.fillStyle = '#06070c';
     c.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
-    const inWorld = [GAME_STATE.PLAYING, GAME_STATE.UPGRADE, GAME_STATE.PAUSED].includes(this.state) ||
+    const inWorld = [GAME_STATE.PLAYING, GAME_STATE.UPGRADE, GAME_STATE.EVENT, GAME_STATE.PAUSED].includes(this.state) ||
                     (this.state === GAME_STATE.GAMEOVER) || (this.state === GAME_STATE.VICTORY);
 
     if (this.player && inWorld && this.currentRoom) {
@@ -734,6 +806,7 @@ export class Game {
     switch (this.state) {
       case GAME_STATE.MENU: this.screens.menu(); break;
       case GAME_STATE.UPGRADE: this.screens.upgrade(); break;
+      case GAME_STATE.EVENT: this.screens.event(); break;
       case GAME_STATE.PAUSED: this.screens.pause(); break;
       case GAME_STATE.GAMEOVER: this.screens.gameOver(); break;
       case GAME_STATE.VICTORY: this.screens.victory(); break;

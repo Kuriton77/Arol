@@ -100,6 +100,13 @@ export const ENEMY_TYPES = {
     color: '#4f8ad6', accent: '#a8d0ff', xp: 15, gold: 7, knockbackResist: 1,
     attack: { range: 999, cooldown: 2.4, windup: 0.7, projSpeed: 240, knockback: 100, radial: 8 },
   },
+  shadow: {
+    // The player's reflection (Mirror Trial event). Fast, aggressive, relentless.
+    name: 'Your Shadow', ai: 'melee', shape: 'circle',
+    radius: 14, health: 85, speed: 205, damage: 14,
+    color: '#161a28', accent: '#8fb0ff', xp: 25, gold: 15, knockbackResist: 0.3,
+    attack: { range: 34, cooldown: 0.7, windup: 0.22, lunge: 380, knockback: 240 },
+  },
   mimic: {
     // Disguised as treasure; springs to life with frenzied bites. (Event rooms.)
     name: 'Mimic', ai: 'melee', shape: 'square',

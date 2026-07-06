@@ -227,6 +227,47 @@ assert(['playing', 'gameover', 'upgrade'].includes(enemyPhase.state), 'sim staye
 // Reset to sword for boss test.
 await page.evaluate(() => { const g = window.__AROL__; g.save.data.selectedWeapon = 'sword'; g.startRun(); });
 
+// --- Event rooms: 10 events, options resolve, fights pay on clear ---
+const eventPhase = await page.evaluate(async () => {
+  const g = window.__AROL__;
+  const { EVENTS, eventById } = await import('./src/data/events.js');
+  const outcomes = {};
+  for (const ev of EVENTS) {
+    g.save.data.selectedWeapon = 'sword';
+    g.startRun();
+    const room = g.dungeon.rooms.find((r) => r.type === 'event') || g.dungeon.rooms.find((r) => r.type === 'combat');
+    room.reward = { kind: 'event', variant: ev.id };
+    room.cleared = true; room.type = 'event'; room.enemyPlan = [];
+    g._enterRoom(room, null, false);
+    g.player.gold = 200; // afford every option
+    // Give the test pilot a mid-run loadout so event fights are fair.
+    const { UPGRADES } = await import('./src/data/upgrades.js');
+    g._applyUpgrade(UPGRADES.find((u) => u.id === 'power'));
+    g._applyUpgrade(UPGRADES.find((u) => u.id === 'vigor'));
+    g._applyUpgrade(UPGRADES.find((u) => u.id === 'lifesteal'));
+    g.currentEvent = eventById(ev.id);
+    g._setState('event');
+    const opts = ev.options(g);
+    g._eventChoose(opts[0]); // always take the first (riskiest) option
+    // If a fight started, battle it out.
+    let frames = 0;
+    while (g.eventFight && frames++ < 60 * 30) {
+      const t = g.enemies.find((e) => e.alive);
+      if (t) { g.input.mouse.x = t.x; g.input.mouse.y = t.y; g.input.mouse.down = true; }
+      g.update(1 / 60);
+      if (g.state === 'upgrade') { if (g.shopMode) g._closeShop(); else g._pickUpgrade(g.upgradeChoices[0]); }
+      if (g.state === 'gameover') break;
+    }
+    if (g.state === 'upgrade') { if (g.shopMode) g._closeShop(); else g._pickUpgrade(g.upgradeChoices[0]); }
+    outcomes[ev.id] = { state: g.state, fightDone: !g.eventFight };
+  }
+  return { count: EVENTS.length, outcomes };
+});
+console.log('  event phase:', JSON.stringify(eventPhase.outcomes));
+assert(eventPhase.count >= 10, `10+ event types defined (${eventPhase.count})`);
+assert(Object.values(eventPhase.outcomes).every((o) => o.fightDone), 'all event fights resolve');
+assert(Object.values(eventPhase.outcomes).every((o) => ['playing', 'gameover', 'upgrade'].includes(o.state)), 'events leave the game in a valid state');
+
 // --- Biomes: each floor themes rooms, enemies, hazards, decor ---
 const biomePhase = await page.evaluate(async () => {
   const g = window.__AROL__;

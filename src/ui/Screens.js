@@ -179,6 +179,43 @@ export class Screens {
     lines.forEach((ln, i) => this.ui.text(ln, cx, y + i * lh, opts));
   }
 
+  // ------------------------------------------------------------------- event
+  event() {
+    const c = this.ctx, ui = this.ui, g = this.game;
+    const ev = g.currentEvent;
+    if (!ev) return;
+    ui.dim(0.65);
+
+    const w = 560, x = (this.W - w) / 2;
+    const options = ev.options(g);
+    const h = 210 + options.length * 66 + 56;
+    const y = (this.H - h) / 2;
+    ui.panel(x, y, w, h, { stroke: 'rgba(140,160,230,0.6)' });
+
+    ui.text(ev.icon || '✦', this.W / 2, y + 52, { font: '34px system-ui', align: 'center' });
+    ui.text(ev.name.toUpperCase(), this.W / 2, y + 88, { font: 'bold 24px "Trebuchet MS", system-ui', align: 'center', color: '#eaf1ff', shadow: true });
+    this._wrap(ev.flavour, this.W / 2, y + 118, w - 80, 19, { align: 'center', color: '#9fb2dd', font: 'italic 14px "Trebuchet MS", system-ui' });
+
+    let oy = y + 175;
+    for (const opt of options) {
+      const enabled = !opt.disabled;
+      if (ui.button(x + 40, oy, w - 80, 52, '', {
+        color: enabled ? '#25335c' : '#1c2030',
+        hoverColor: enabled ? '#35498a' : '#1c2030',
+        stroke: enabled ? undefined : 'rgba(90,100,130,0.4)',
+      }) && enabled) {
+        g._eventChoose(opt);
+        return;
+      }
+      ui.text(opt.label, x + 60, oy + 22, { font: 'bold 15px system-ui', color: enabled ? '#f0f3fb' : '#6a7590' });
+      ui.text(opt.sub, x + 60, oy + 40, { font: '12px system-ui', color: enabled ? '#96a8d0' : '#565f78' });
+      oy += 66;
+    }
+    if (ui.button(this.W / 2 - 70, oy + 4, 140, 36, 'Leave', { color: '#3a3a4a', hoverColor: '#4a4a5f', font: 'bold 14px system-ui' })) {
+      g._eventChoose(null);
+    }
+  }
+
   // ------------------------------------------------------------------- pause
   pause() {
     const ui = this.ui, g = this.game;

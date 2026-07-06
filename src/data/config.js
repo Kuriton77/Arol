@@ -65,6 +65,7 @@ export const GAME_STATE = Object.freeze({
   MENU: 'menu',
   PLAYING: 'playing',
   UPGRADE: 'upgrade',
+  EVENT: 'event',
   PAUSED: 'paused',
   GAMEOVER: 'gameover',
   VICTORY: 'victory',

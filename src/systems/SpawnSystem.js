@@ -21,15 +21,25 @@ export class SpawnSystem {
         boss = new Boss(b.w / 2, b.h * 0.32, bossDef, depthLevel);
         continue;
       }
-      const def = ENEMY_TYPES[group.type];
-      for (let i = 0; i < group.count; i++) {
-        const pos = this._safePos(b, player);
-        const e = new Enemy(pos.x, pos.y, def, room.depth + depthLevel * 4);
-        if (group.elite) e.makeElite();
-        enemies.push(e);
-      }
+      enemies.push(...this.spawnPlan([group], b, player, room.depth + depthLevel * 4));
     }
     return { enemies, boss };
+  }
+
+  // Instantiate a [{type, count, elite}] plan at safe positions (rooms, events).
+  spawnPlan(plan, bounds, player, depth = 0) {
+    const out = [];
+    for (const group of plan) {
+      const def = ENEMY_TYPES[group.type];
+      if (!def) continue;
+      for (let i = 0; i < group.count; i++) {
+        const pos = this._safePos(bounds, player);
+        const e = new Enemy(pos.x, pos.y, def, depth);
+        if (group.elite) e.makeElite();
+        out.push(e);
+      }
+    }
+    return out;
   }
 
   // Spawn a specific archetype at an exact position (summons, events, mimics).

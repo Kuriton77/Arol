@@ -3,6 +3,7 @@
 // Deterministic given a seed, so runs are reproducible & testable.
 import { Room, DIRS } from './Room.js';
 import { ROOM, CONFIG } from '../data/config.js';
+import { EVENTS } from '../data/events.js';
 
 export function generateDungeon(seed, depthLevel = 0, biome = null) {
   const rng = seed;               // a mulberry32 rng from makeRng
@@ -69,7 +70,7 @@ export function generateDungeon(seed, depthLevel = 0, biome = null) {
   // Assign special rooms among the remaining (exclude start & boss).
   const others = rooms.filter((r) => r !== start && r !== boss);
   rng.shuffle(others);
-  const specials = [ROOM.TREASURE, ROOM.SHOP, ROOM.ELITE, ROOM.EVENT, ROOM.TREASURE];
+  const specials = [ROOM.TREASURE, ROOM.SHOP, ROOM.ELITE, ROOM.EVENT, ROOM.TREASURE, ROOM.EVENT];
   let si = 0;
   for (const r of others) {
     if (si < specials.length && r.depth >= 2) { r.type = specials[si++]; }
@@ -128,7 +129,7 @@ function buildRoomContent(room, rng, depthLevel, biome) {
       room.reward = { kind: 'shop' };
       break;
     case ROOM.EVENT:
-      room.reward = { kind: 'event', variant: rng.pick(['heal', 'gamble', 'sacrifice']) };
+      room.reward = { kind: 'event', variant: rng.pick(EVENTS.map((e) => e.id)) };
       break;
     case ROOM.BOSS:
       room.enemyPlan = [{ type: 'boss', count: 1 }];
