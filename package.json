@@ -1,0 +1,21 @@
+{
+  "name": "arol",
+  "version": "1.0.0",
+  "description": "Arol — a modern rogue-lite dungeon crawler MVP (vanilla JS + HTML5 Canvas, zero runtime dependencies)",
+  "type": "module",
+  "scripts": {
+    "start": "python3 -m http.server 8017 --bind 127.0.0.1",
+    "serve": "python3 -m http.server 8017 --bind 127.0.0.1",
+    "test": "node scripts/smoke-test.mjs",
+    "shots": "node scripts/capture-screens.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "http://local_proxy@127.0.0.1:41729/git/Kuriton77/Arol"
+  },
+  "keywords": ["game", "roguelite", "dungeon-crawler", "canvas", "html5"],
+  "license": "MIT",
+  "devDependencies": {
+    "playwright-core": "^1.61.1"
+  }
+}
