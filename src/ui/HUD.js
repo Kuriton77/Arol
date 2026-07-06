@@ -18,7 +18,14 @@ export class HUD {
     const c = this.ctx;
     const p = game.player;
     if (!p) return;
+    const W = c.canvas.width, H = c.canvas.height;
+    // Each HUD cluster scales about its own screen corner (via the shared UI
+    // scale) so it grows/shrinks in place and stays pinned to its edge — never
+    // drifting off-screen the way a single centre-scale would. Fall back to a
+    // no-op push/pop if no UI is wired (defensive).
+    const ui = game.ui || { pushAnchor() { c.save(); }, pop() { c.restore(); } };
 
+    ui.pushAnchor(0, 0); // top-left cluster
     // --- Health bar ---
     const hpFrac = p.health / p.maxHealth;
     this._bar(16, 16, 260, 22, hpFrac, '#e8574a', '#3a1618');
@@ -53,9 +60,10 @@ export class HUD {
       c.arc(330 + i * 13, 24, 4, 0, Math.PI * 2);
       c.fill();
     }
+    ui.pop(); // end top-left cluster
 
-    // --- Currency / floor / difficulty / heat (top-right, stacked) ---
-    const W = c.canvas.width;
+    // --- Currency / floor / difficulty / heat + minimap (top-right cluster) ---
+    ui.pushAnchor(W, 0);
     c.textAlign = 'right'; c.textBaseline = 'top';
     c.font = 'bold 15px "Trebuchet MS", system-ui';
     let ty = 16;
@@ -82,23 +90,32 @@ export class HUD {
 
     // --- Minimap (below the stacked status lines) ---
     this._minimap(game, W - 168, ty + 4);
+    ui.pop(); // end top-right cluster
 
-    // --- Boss health bar ---
-    if (game.boss && game.boss.alive) this._bossBar(game);
+    // --- Boss health bar (bottom-centre) ---
+    if (game.boss && game.boss.alive) {
+      ui.pushAnchor(W / 2, H);
+      this._bossBar(game);
+      ui.pop();
+    }
 
-    // --- Contextual prompt ---
+    // --- Contextual prompt (bottom-centre) ---
     if (game.prompt) {
+      ui.pushAnchor(W / 2, H);
       c.textAlign = 'center'; c.textBaseline = 'bottom';
       c.font = 'bold 16px "Trebuchet MS", system-ui';
       c.fillStyle = 'rgba(0,0,0,0.5)';
       const tw = c.measureText(game.prompt).width + 28;
-      roundRect(c, W / 2 - tw / 2, c.canvas.height - 92, tw, 30, 8); c.fill();
+      roundRect(c, W / 2 - tw / 2, H - 92, tw, 30, 8); c.fill();
       c.fillStyle = '#eaf1ff';
-      c.fillText(game.prompt, W / 2, c.canvas.height - 70);
+      c.fillText(game.prompt, W / 2, H - 70);
+      ui.pop();
     }
 
     // --- Owned boons (bottom-left, compact) ---
+    ui.pushAnchor(0, H);
     this._boons(game);
+    ui.pop();
   }
 
   _bar(x, y, w, h, frac, color, bg) {

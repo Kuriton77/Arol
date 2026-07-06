@@ -10,13 +10,43 @@ export class UI {
     this.audio = audio;
     this._hoverPrev = null;
     this._activeSlider = null; // id of the slider currently being dragged
+    // Single global UI scale (set from the UI Scale setting). Widgets are
+    // drawn in the fixed 960×540 design space; a scale transform about an
+    // anchor resizes them, and mouse coords are mapped by the same transform
+    // so hit-testing always aligns. Centered overlays scale about the centre;
+    // the HUD scales each cluster about its own screen corner.
+    this.scale = 1;
+    this.mx = 0; this.my = 0; // design-space mouse for centre-anchored widgets
   }
 
-  // Begin a frame of UI (call once before declaring widgets).
+  setScale(s) { this.scale = s; }
+
+  get _cx() { return this.ctx.canvas.width / 2; }
+  get _cy() { return this.ctx.canvas.height / 2; }
+
+  // Scale transform about an arbitrary screen anchor (absolute canvas px).
+  pushAnchor(ax, ay) {
+    const c = this.ctx;
+    c.save();
+    c.translate(ax, ay); c.scale(this.scale, this.scale); c.translate(-ax, -ay);
+  }
+  pushCenter() { this.pushAnchor(this._cx, this._cy); }
+  pop() { this.ctx.restore(); }
+
+  // Map a raw canvas mouse coord back into design space for a given anchor,
+  // so scaled widgets hit-test correctly.
+  _unproject(px, py, ax, ay) {
+    return { x: ax + (px - ax) / this.scale, y: ay + (py - ay) / this.scale };
+  }
+
+  // Begin a frame of UI (call once before declaring widgets). Precomputes the
+  // centre-anchored design-space mouse used by all interactive widgets (which
+  // only ever live in centre-scaled overlays).
   begin() {
     this._hoveredAny = false;
-    // Drop the drag latch as soon as the mouse is released.
     if (!this.input.mouse.down) this._activeSlider = null;
+    const m = this._unproject(this.input.mouse.x, this.input.mouse.y, this._cx, this._cy);
+    this.mx = m.x; this.my = m.y;
   }
 
   panel(x, y, w, h, opts = {}) {
@@ -46,9 +76,10 @@ export class UI {
   // Returns true on the frame the button is clicked.
   button(x, y, w, h, label, opts = {}) {
     const c = this.ctx;
-    const m = this.input.mouse;
-    const hover = m.x >= x && m.x <= x + w && m.y >= y && m.y <= y + h;
-    const clicked = hover && m.pressed;
+    // Use the scale-mapped design-space mouse so hit areas match what's drawn.
+    const mx = this.mx, my = this.my;
+    const hover = mx >= x && mx <= x + w && my >= y && my <= y + h;
+    const clicked = hover && this.input.mouse.pressed;
     if (hover) this._hoveredAny = true;
 
     c.save();
@@ -88,26 +119,32 @@ export class UI {
     c.restore();
   }
 
-  dim(alpha = 0.6) {
+  // Full-screen backdrops always cover the viewport regardless of UI scale, so
+  // they're drawn in identity space (the scale transform is reset then restored).
+  fillScreen(style) {
     const c = this.ctx;
-    c.fillStyle = `rgba(6,8,16,${alpha})`;
+    c.save();
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.fillStyle = style;
     c.fillRect(0, 0, c.canvas.width, c.canvas.height);
+    c.restore();
   }
+  dim(alpha = 0.6) { this.fillScreen(`rgba(6,8,16,${alpha})`); }
 
   // Draggable horizontal slider (immediate-mode). `id` latches the active drag
   // across frames so the value updates live while the mouse is held anywhere.
   // Returns the current value in [0,1]; caller compares to detect changes.
   slider(x, y, w, id, value, opts = {}) {
     const c = this.ctx;
-    const m = this.input;
     const h = opts.height ?? 8;
     const cy = y + h / 2;
     const pad = 10; // generous vertical hit padding for the track
-    const overTrack = m.mouse.x >= x - 8 && m.mouse.x <= x + w + 8 &&
-                      m.mouse.y >= cy - pad && m.mouse.y <= cy + pad;
-    if (m.mouse.pressed && overTrack) this._activeSlider = id;
+    // Scale-mapped mouse so the grab point matches the drawn handle.
+    const mx = this.mx, my = this.my;
+    const overTrack = mx >= x - 8 && mx <= x + w + 8 && my >= cy - pad && my <= cy + pad;
+    if (this.input.mouse.pressed && overTrack) this._activeSlider = id;
     let v = clamp(value, 0, 1);
-    if (this._activeSlider === id) v = clamp((m.mouse.x - x) / w, 0, 1);
+    if (this._activeSlider === id) v = clamp((mx - x) / w, 0, 1);
 
     const accent = opts.color || '#63b8ff';
     // Track.

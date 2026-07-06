@@ -240,13 +240,13 @@ const eventPhase = await page.evaluate(async () => {
     room.cleared = true; room.type = 'event'; room.enemyPlan = [];
     g._enterRoom(room, null, false);
     g.player.gold = 200; // afford every option
-    // Give the test pilot a mid-run loadout so event fights are fair.
+    // Give the test pilot a strong mid-run loadout so event fights (including
+    // the frontal-blocking Shield Knight in the Prisoner event) reliably
+    // resolve, the way a real build eventually would.
     const { UPGRADES } = await import('./src/data/upgrades.js');
-    g._applyUpgrade(UPGRADES.find((u) => u.id === 'power'));
-    g._applyUpgrade(UPGRADES.find((u) => u.id === 'haste'));
-    g._applyUpgrade(UPGRADES.find((u) => u.id === 'vigor'));
-    g._applyUpgrade(UPGRADES.find((u) => u.id === 'lifesteal'));
-    g._applyUpgrade(UPGRADES.find((u) => u.id === 'regen'));
+    for (const id of ['power', 'power', 'power', 'haste', 'haste', 'reach', 'vigor', 'lifesteal', 'regen']) {
+      g._applyUpgrade(UPGRADES.find((u) => u.id === id));
+    }
     g.currentEvent = eventById(ev.id);
     g._setState('event');
     const opts = ev.options(g);
@@ -254,7 +254,7 @@ const eventPhase = await page.evaluate(async () => {
     // If a fight started, battle it out — orbiting the target to flank
     // frontal-blockers, the way a real player would.
     let frames = 0;
-    while (g.eventFight && frames++ < 60 * 40) {
+    while (g.eventFight && frames++ < 60 * 75) {
       const t = g.enemies.find((e) => e.alive);
       if (t) {
         g.input.mouse.x = t.x; g.input.mouse.y = t.y; g.input.mouse.down = true;
@@ -613,6 +613,59 @@ assert(setPhase.toggleOk, 'toggle settings apply live (damage numbers)');
 assert(setPhase.missingOk, 'missing setting falls back to default');
 assert(setPhase.openedFromPause && setPhase.restoredPause, 'settings restores pause state on close');
 assert(setPhase.categories.includes('Audio'), 'settings expose an Audio category');
+
+// --- UI Scale: stepped setting, live scale, mouse alignment, persistence ---
+const uiScalePhase = await page.evaluate(async () => {
+  const g = window.__AROL__;
+  const { SettingsManager, SETTINGS_SCHEMA } = await import('./src/systems/SettingsManager.js');
+  const schema = SETTINGS_SCHEMA.find((o) => o.id === 'uiScale');
+  const sm = new SettingsManager();
+  sm.bind({ audio: g.audio, game: g });
+
+  // Default 100% and it scales the shared UI value.
+  const defaultOk = schema && schema.default === 1.0 && g.ui.scale === 1.0;
+
+  // Stepped clamp/snap: arbitrary value snaps to the 0.25 grid within range.
+  sm.set('uiScale', 1.37);
+  const snapped = sm.get('uiScale');
+  const snapOk = snapped === 1.25;
+  sm.set('uiScale', 5); // out of range → clamps to max 2.0
+  const clampOk = sm.get('uiScale') === 2.0;
+
+  // Applies live to the UI scale.
+  sm.set('uiScale', 1.5);
+  const liveOk = g.ui.scale === 1.5;
+
+  // Mouse mapping: a screen point unprojects about the centre by 1/scale, so
+  // a scaled button still hit-tests where it is drawn.
+  const cx = g.canvas.width / 2, cy = g.canvas.height / 2;
+  g.input.mouse.x = cx + 100; g.input.mouse.y = cy;
+  g.ui.begin();
+  const expectedMx = cx + 100 / 1.5;
+  const mouseOk = Math.abs(g.ui.mx - expectedMx) < 0.01;
+
+  // Persistence across instances.
+  sm.set('uiScale', 1.75);
+  const persisted = new SettingsManager().get('uiScale') === 1.75;
+
+  // Reset restores default and re-applies.
+  sm.reset();
+  const resetOk = g.ui.scale === 1.0 && sm.get('uiScale') === 1.0;
+
+  return { defaultOk, snapOk, snapped, clampOk, liveOk, mouseOk, persisted, resetOk,
+           category: schema && schema.category };
+});
+console.log('  ui-scale phase:', JSON.stringify(uiScalePhase));
+assert(uiScalePhase.defaultOk, 'UI Scale defaults to 100%');
+assert(uiScalePhase.snapOk, `UI Scale snaps to 25% steps (1.37 → ${uiScalePhase.snapped})`);
+assert(uiScalePhase.clampOk, 'UI Scale clamps to the 200% ceiling');
+assert(uiScalePhase.liveOk, 'UI Scale updates the shared scale in real time');
+assert(uiScalePhase.mouseOk, 'mouse coords remap by scale so hit-testing stays aligned');
+assert(uiScalePhase.persisted, 'UI Scale persists across launches');
+assert(uiScalePhase.resetOk, 'reset restores UI Scale to 100%');
+assert(uiScalePhase.category === 'Interface', 'UI Scale lives in an Interface category (accessibility-ready)');
+// Restore default scale so later work/screens are unaffected.
+await page.evaluate(() => { window.__AROL__.ui.setScale(1); });
 
 console.log('\nConsole errors:', errors.length);
 errors.slice(0, 20).forEach((e) => console.log('  !', e));

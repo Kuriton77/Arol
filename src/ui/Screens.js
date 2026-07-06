@@ -34,10 +34,14 @@ export class Screens {
   // ---------------------------------------------------------- menu (NPC hub)
   menu() {
     const c = this.ctx, ui = this.ui, g = this.game;
-    // Backdrop gradient.
+    // Backdrop gradient (full-screen, drawn in identity so UI scale never
+    // leaves uncovered borders).
+    c.save();
+    c.setTransform(1, 0, 0, 1, 0, 0);
     const grad = c.createLinearGradient(0, 0, 0, this.H);
     grad.addColorStop(0, '#0b0e18'); grad.addColorStop(1, '#141024');
     c.fillStyle = grad; c.fillRect(0, 0, this.W, this.H);
+    c.restore();
 
     ui.text('A R O L', this.W / 2, 52, { font: 'bold 44px "Trebuchet MS", system-ui', align: 'center', color: '#eaf1ff', shadow: true });
     ui.text(`✦ ${g.save.data.souls} souls`, this.W / 2, 80, { font: 'bold 17px system-ui', align: 'center', color: '#b48cff' });
@@ -305,8 +309,7 @@ export class Screens {
       const u = shop ? it.upgrade : it;
       const rar = RARITY[u.rarity];
       const x = x0 + i * (cardW + gap);
-      const m = this.ui.input.mouse;
-      const hover = m.x >= x && m.x <= x + cardW && m.y >= y0 && m.y <= y0 + cardH;
+      const hover = this.ui.mx >= x && this.ui.mx <= x + cardW && this.ui.my >= y0 && this.ui.my <= y0 + cardH;
 
       // Card.
       c.save();
@@ -423,50 +426,52 @@ export class Screens {
   // Data-driven from SETTINGS_SCHEMA: sliders + toggles grouped by category.
   // Overlays whatever it was opened from (menu backdrop or paused world).
   settings() {
-    const c = this.ctx, ui = this.ui, g = this.game, s = g.settings;
+    const ui = this.ui, g = this.game, s = g.settings;
     ui.dim(0.8);
-    ui.text('SETTINGS', this.W / 2, 62, { font: 'bold 34px "Trebuchet MS", system-ui', align: 'center', color: '#eaf1ff', shadow: true });
-    ui.text('drag sliders · click toggles · ESC to close', this.W / 2, 88,
+    ui.text('SETTINGS', this.W / 2, 46, { font: 'bold 32px "Trebuchet MS", system-ui', align: 'center', color: '#eaf1ff', shadow: true });
+    ui.text('drag sliders · click toggles · ESC to close', this.W / 2, 70,
       { font: '13px system-ui', align: 'center', color: '#8fa4cc' });
 
     const px = this.W / 2 - 300, pw = 600;
-    ui.panel(px, 108, pw, 348);
-    let y = 132;
+    ui.panel(px, 90, pw, 388);
+    let y = 112;
     for (const cat of s.categories()) {
-      ui.text(cat.toUpperCase(), px + 28, y + 6, { font: 'bold 14px system-ui', color: '#9fb2dd' });
-      y += 28;
+      ui.text(cat.toUpperCase(), px + 28, y + 4, { font: 'bold 13px system-ui', color: '#9fb2dd' });
+      y += 26;
       for (const opt of SETTINGS_SCHEMA.filter((o) => o.category === cat)) {
         const val = s.get(opt.id);
-        ui.text(opt.label, px + 40, y + 15, { font: '14px system-ui', color: '#e8ecf5' });
+        ui.text(opt.label, px + 40, y + 13, { font: '14px system-ui', color: '#e8ecf5' });
         if (opt.type === 'slider') {
-          const sx = px + 250, sw = 210;
-          const nv = ui.slider(sx, y + 11, sw, opt.id, val, { color: '#63b8ff' });
-          if (Math.abs(nv - val) > 0.0005) s.set(opt.id, nv);
-          ui.text(`${Math.round(s.get(opt.id) * 100)}%`, px + pw - 28, y + 15,
+          const sx = px + 250, sw = 200;
+          const min = opt.min ?? 0, max = opt.max ?? 1;
+          const norm = (val - min) / (max - min);
+          const nn = ui.slider(sx, y + 9, sw, opt.id, norm, { color: '#63b8ff' });
+          if (Math.abs(nn - norm) > 0.0005) s.set(opt.id, min + nn * (max - min));
+          ui.text(`${Math.round(s.get(opt.id) * 100)}%`, px + pw - 28, y + 13,
             { font: 'bold 13px system-ui', align: 'right', color: '#bfe8ff' });
         } else if (opt.type === 'toggle') {
-          if (ui.button(px + pw - 116, y, 88, 30, val ? 'ON' : 'OFF', {
+          if (ui.button(px + pw - 116, y - 2, 88, 28, val ? 'ON' : 'OFF', {
             color: val ? '#2f6f4f' : '#3a3a4a', hoverColor: val ? '#3f9968' : '#4a4a5f',
             font: 'bold 13px system-ui',
           })) s.toggle(opt.id);
         }
-        y += 42;
+        y += 38;
       }
-      y += 10;
+      y += 6;
     }
 
-    if (ui.button(this.W / 2 - 180, 470, 170, 42, 'Reset Defaults', { color: '#3a3a4a', hoverColor: '#4a4a5f' })) {
+    if (ui.button(this.W / 2 - 180, 490, 170, 40, 'Reset Defaults', { color: '#3a3a4a', hoverColor: '#4a4a5f' })) {
       s.reset();
       g.audio.play('uiconfirm');
     }
-    if (ui.button(this.W / 2 + 10, 470, 170, 42, 'Close', { color: '#2f6f4f', hoverColor: '#3f9968' })) g._closeSettings();
+    if (ui.button(this.W / 2 + 10, 490, 170, 40, 'Close', { color: '#2f6f4f', hoverColor: '#3f9968' })) g._closeSettings();
   }
 
   // --------------------------------------------------------------- game over
   gameOver() {
     const c = this.ctx, ui = this.ui, g = this.game;
     ui.dim(0.75);
-    c.fillStyle = 'rgba(120,20,30,0.15)'; c.fillRect(0, 0, this.W, this.H);
+    ui.fillScreen('rgba(120,20,30,0.15)');
     ui.text('YOU DIED', this.W / 2, this.H / 2 - 120, { font: 'bold 48px system-ui', align: 'center', color: '#ff5a6a', shadow: true });
     ui.text(`Floor ${g.floor}  ·  ${g.kills} kills  ·  ${g.roomsCleared} rooms cleared`,
       this.W / 2, this.H / 2 - 66, { font: '18px system-ui', align: 'center', color: '#d8dced' });
@@ -490,7 +495,7 @@ export class Screens {
   victory() {
     const c = this.ctx, ui = this.ui, g = this.game;
     ui.dim(0.7);
-    c.fillStyle = 'rgba(120,90,20,0.14)'; c.fillRect(0, 0, this.W, this.H);
+    ui.fillScreen('rgba(120,90,20,0.14)');
     ui.text('VICTORY', this.W / 2, this.H / 2 - 130, { font: 'bold 52px system-ui', align: 'center', color: '#ffd23f', shadow: true });
     ui.text(`${g.bossDef ? g.bossDef.name : 'The boss'} has fallen`, this.W / 2, this.H / 2 - 86, { font: '18px system-ui', align: 'center', color: '#ffe6a8' });
     ui.text(`Floor ${g.floor}  ·  ${g.kills} kills  ·  ✦ ${g._lastSouls || 0} souls banked`,

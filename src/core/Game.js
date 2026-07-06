@@ -954,8 +954,12 @@ export class Game {
       }
     }
 
-    // State overlays / screens.
+    // State overlays / screens. All centred overlays scale about the screen
+    // centre by the global UI scale; full-screen backdrops inside them reset
+    // to identity so they always cover the viewport. Mouse hit-testing uses
+    // the same centre-anchored mapping (ui.begin), so clicks stay aligned.
     this.ui.begin();
+    this.ui.pushCenter();
     switch (this.state) {
       case GAME_STATE.MENU: this.screens.menu(); break;
       case GAME_STATE.UPGRADE: this.screens.upgrade(); break;
@@ -965,5 +969,6 @@ export class Game {
       case GAME_STATE.GAMEOVER: this.screens.gameOver(); break;
       case GAME_STATE.VICTORY: this.screens.victory(); break;
     }
+    this.ui.pop();
   }
 }

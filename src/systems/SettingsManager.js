@@ -25,6 +25,14 @@ export const SETTINGS_SCHEMA = [
   { id: 'volUi', category: 'Audio', label: 'UI Volume', type: 'slider', default: 0.6,
     apply: (v, ctx) => ctx.audio.setVolume('ui', v) },
 
+  // --- Interface / accessibility ---
+  // Stepped slider (75%–200%). `format: 'percent'` shows value×100. Future
+  // accessibility options (Large Text, High Contrast, Colorblind, Font, HUD
+  // Opacity/Position…) drop in here as additional schema entries.
+  { id: 'uiScale', category: 'Interface', label: 'UI Scale', type: 'slider',
+    default: 1.0, min: 0.75, max: 2.0, step: 0.25, format: 'percent',
+    apply: (v, ctx) => { if (ctx.game.ui) ctx.game.ui.setScale(v); } },
+
   // --- Visuals (demonstrates the toggle path; more can be added freely) ---
   { id: 'screenShake', category: 'Visuals', label: 'Screen Shake', type: 'toggle', default: true,
     apply: (v, ctx) => { if (ctx.game.camera) ctx.game.camera.shakeEnabled = v; } },
@@ -64,13 +72,18 @@ export class SettingsManager {
   schemaFor(id) { return SETTINGS_SCHEMA.find((s) => s.id === id); }
   get(id) { return this.values[id]; }
 
-  // Set a value, clamp it to its type, persist, and apply it live.
+  // Set a value, clamp/snap it to its schema, persist, and apply it live.
   set(id, value) {
     const schema = this.schemaFor(id);
     if (!schema) return;
     let v = value;
-    if (schema.type === 'slider') v = Math.max(0, Math.min(1, +value));
-    else if (schema.type === 'toggle') v = !!value;
+    if (schema.type === 'slider') {
+      const min = schema.min ?? 0, max = schema.max ?? 1;
+      v = Math.max(min, Math.min(max, +value));
+      if (schema.step) v = Math.min(max, Math.max(min, Math.round((v - min) / schema.step) * schema.step + min));
+    } else if (schema.type === 'toggle') {
+      v = !!value;
+    }
     this.values[id] = v;
     this.save();
     this._applyOne(schema, v);
