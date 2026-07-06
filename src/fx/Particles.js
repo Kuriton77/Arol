@@ -30,6 +30,11 @@ export class Particles {
     }
   }
 
+  // Single slow-drifting ambient particle (biome atmosphere: snow, embers...).
+  drift(x, y, color, vx, vy, life, size) {
+    this.pool.spawn({ x, y, vx, vy, life, maxLife: life, size, color, drag: 1, dead: false });
+  }
+
   update(dt) {
     this.pool.update((p) => {
       p.life -= dt;

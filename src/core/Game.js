@@ -17,7 +17,8 @@ import { drawUpgrades, UPGRADES, RARITY } from '../data/upgrades.js';
 import { RELICS, relicById } from '../data/relics.js';
 import { META_UPGRADES } from '../data/meta.js';
 import { WEAPONS, weaponById } from '../data/weapons.js';
-import { bossForFloor } from '../data/bosses.js';
+import { bossById } from '../data/bosses.js';
+import { biomeForFloor } from '../data/biomes.js';
 import { SynergySystem } from '../systems/SynergySystem.js';
 import { Hazards } from '../fx/Hazards.js';
 import { Renderer } from '../render/Renderer.js';
@@ -150,7 +151,11 @@ export class Game {
 
     this._buildFloor();
     this._setState(GAME_STATE.PLAYING);
-    this.audio.setMood('explore');
+    this._exploreMood();
+  }
+
+  _exploreMood() {
+    this.audio.setMood('explore', this.biome ? this.biome.musicScale : null);
   }
 
   _applyMeta(stats) {
@@ -165,8 +170,10 @@ export class Game {
     this.rng = makeRng(seed);
     if (this.player) this.player.stats.secondWindUsed = false; // once per floor
     this.spawnSystem = new SpawnSystem(this.rng);
-    this.bossDef = bossForFloor(this.floor);
-    this.dungeon = generateDungeon(this.rng, this.floor - 1);
+    this.biome = biomeForFloor(this.floor);
+    this.bossDef = bossById(this.biome.bossId);
+    this.dungeon = generateDungeon(this.rng, this.floor - 1, this.biome);
+    this._ambientT = 0;
     this.enemies = [];
     this.boss = null;
     this.projectiles.clear();
@@ -201,6 +208,9 @@ export class Game {
     }
 
     this.hazards.clear();
+    if (room.envHazards) {
+      for (const h of room.envHazards) this.hazards.spawn({ ...h });
+    }
     if (room.needsClearing) {
       const { enemies, boss } = this.spawnSystem.spawnRoom(room, this.floor - 1, this.player, this.bossDef);
       this.enemies = enemies;
@@ -218,7 +228,7 @@ export class Game {
       }
     } else {
       room.locked = false;
-      this.audio.setMood('explore');
+      this._exploreMood();
       if (room.reward && !room.rewardTaken) {
         this.prompt = this._rewardPrompt(room.reward);
       } else if (room.type === ROOM.START && !initial) {
@@ -249,7 +259,7 @@ export class Game {
       if (this.isBossRoom) {
         this._pendingVictory = true;
       } else {
-        this.audio.setMood('explore');
+        this._exploreMood();
         // Reward for clearing a combat/elite room: a free boon.
         this._queueUpgrades(1, 'boon');
       }
@@ -291,7 +301,8 @@ export class Game {
     this.shopMode = false;
     this.choiceSource = this.upgradeQueue[0];
     const pool = this.choiceSource === 'relic' ? RELICS : this.boonPool;
-    this.upgradeChoices = drawUpgrades(this.rng, CONFIG.progression.upgradesOnLevel, this.ownedCounts, pool);
+    const bias = this.choiceSource === 'relic' && this.biome ? this.biome.lootBias : null;
+    this.upgradeChoices = drawUpgrades(this.rng, CONFIG.progression.upgradesOnLevel, this.ownedCounts, pool, bias);
     // Boss kills lead their relic choice with the boss-exclusive relic.
     if (this.choiceSource === 'relic' && this._pendingBossRelic) {
       const exclusive = relicById(this._pendingBossRelic);
@@ -478,7 +489,7 @@ export class Game {
     this.player.health = Math.min(this.player.maxHealth, this.player.health + Math.round(this.player.maxHealth * 0.35));
     this._buildFloor();
     this._setState(GAME_STATE.PLAYING);
-    this.audio.setMood('explore');
+    this._exploreMood();
   }
 
   _setState(s) {
@@ -618,6 +629,21 @@ export class Game {
     this._separateEnemies();
 
     // --- fx ---
+    if (this.biome && this.biome.ambient) {
+      this._ambientT -= dt;
+      if (this._ambientT <= 0) {
+        const amb = this.biome.ambient;
+        this._ambientT = 1 / amb.rate;
+        this.particles.drift(
+          60 + Math.random() * (CONFIG.world.width - 120),
+          40 + Math.random() * (CONFIG.world.height - 80),
+          amb.color,
+          amb.vx + (Math.random() - 0.5) * 6,
+          amb.vy + (Math.random() - 0.5) * 6,
+          2.5 + Math.random() * 2, amb.size,
+        );
+      }
+    }
     this.particles.update(dt);
     this.damageNumbers.update(dt);
     this.camera.update(dt);

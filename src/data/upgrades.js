@@ -285,16 +285,24 @@ export const UPGRADES = [...HANDWRITTEN, ...GENERATED];
 
 // Weighted random draw of `n` distinct upgrades, honouring stackability.
 // `sourcePool` lets callers mix in weapon-exclusive / relic pools.
-export function drawUpgrades(rng, n, ownedCounts, sourcePool = UPGRADES) {
+// `bias` ({tag: multiplier}) skews draws — biomes favour their element.
+export function drawUpgrades(rng, n, ownedCounts, sourcePool = UPGRADES, bias = null) {
   const pool = sourcePool.filter((u) => u.stackable || !(ownedCounts[u.id] > 0));
+  const weightOf = (u) => {
+    let w = RARITY[u.rarity].weight;
+    if (bias && u.tags) {
+      for (const t of u.tags) if (bias[t]) w *= bias[t];
+    }
+    return w;
+  };
   const picks = [];
   const available = [...pool];
   for (let i = 0; i < n && available.length; i++) {
-    const total = available.reduce((sum, u) => sum + RARITY[u.rarity].weight, 0);
+    const total = available.reduce((sum, u) => sum + weightOf(u), 0);
     let roll = rng() * total;
     let idx = 0;
     for (; idx < available.length; idx++) {
-      roll -= RARITY[available[idx].rarity].weight;
+      roll -= weightOf(available[idx]);
       if (roll <= 0) break;
     }
     idx = Math.min(idx, available.length - 1);

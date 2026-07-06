@@ -16,6 +16,7 @@ export class Renderer {
     c.translate(Math.round(shake.x - game.camera.x), Math.round(shake.y - game.camera.y));
 
     this._room(game);
+    this._decor(game);
     this._reward(game);
     game.hazards.render(c);
     // Draw player projectiles & fx below actors, hostile above for readability.
@@ -36,10 +37,11 @@ export class Renderer {
     const b = { x: 0, y: 0, w: CONFIG.world.width, h: CONFIG.world.height };
     const pad = CONFIG.world.roomPadding;
 
-    // Floor. Boss rooms take their arena theme from the boss definition.
+    // Floor. Boss rooms take their arena theme from the boss definition;
+    // ordinary rooms take the biome palette; special rooms keep their tints.
     const tint = (room && room.type === ROOM.BOSS && game.bossDef && game.bossDef.arena)
       ? game.bossDef.arena
-      : this._roomTint(room ? room.type : ROOM.COMBAT);
+      : this._roomTint(room ? room.type : ROOM.COMBAT, game.biome);
     c.fillStyle = tint.floor;
     c.fillRect(0, 0, b.w, b.h);
 
@@ -96,15 +98,92 @@ export class Renderer {
     }
   }
 
-  _roomTint(type) {
+  _roomTint(type, biome = null) {
     switch (type) {
       case ROOM.BOSS:     return { floor: '#241018', wall: '#3a1826', grid: 'rgba(200,80,120,0.08)' };
-      case ROOM.ELITE:    return { floor: '#1c1526', wall: '#2c2140', grid: 'rgba(150,110,220,0.09)' };
+      case ROOM.ELITE:    return (biome && biome.elitePalette) || { floor: '#1c1526', wall: '#2c2140', grid: 'rgba(150,110,220,0.09)' };
       case ROOM.TREASURE: return { floor: '#1e1c12', wall: '#33301c', grid: 'rgba(220,190,90,0.09)' };
       case ROOM.SHOP:     return { floor: '#12201c', wall: '#1d3330', grid: 'rgba(90,210,180,0.09)' };
       case ROOM.EVENT:    return { floor: '#141a24', wall: '#22304a', grid: 'rgba(120,160,230,0.09)' };
-      case ROOM.START:    return { floor: '#12161f', wall: '#1e2634', grid: 'rgba(120,150,210,0.07)' };
-      default:            return { floor: '#12141c', wall: '#20242f', grid: 'rgba(120,140,200,0.06)' };
+      default:            return (biome && biome.palette) || { floor: '#12141c', wall: '#20242f', grid: 'rgba(120,140,200,0.06)' };
+    }
+  }
+
+  // Biome decorations: cheap deterministic canvas props drawn as floor decals.
+  _decor(game) {
+    const room = game.currentRoom;
+    if (!room || !room.decor) return;
+    const c = this.ctx;
+    const col = game.biome ? game.biome.decor.color : '#2c3245';
+    for (const d of room.decor) {
+      c.save();
+      c.translate(d.x, d.y);
+      const s = d.size;
+      switch (d.kind) {
+        case 'pillar':
+          c.fillStyle = 'rgba(0,0,0,0.35)';
+          c.beginPath(); c.ellipse(0, 14 * s, 14 * s, 5 * s, 0, 0, TAU); c.fill();
+          c.fillStyle = col;
+          c.fillRect(-9 * s, -22 * s, 18 * s, 36 * s);
+          c.fillStyle = 'rgba(255,255,255,0.08)';
+          c.fillRect(-9 * s, -22 * s, 5 * s, 36 * s);
+          break;
+        case 'grave':
+          c.fillStyle = 'rgba(0,0,0,0.3)';
+          c.beginPath(); c.ellipse(0, 10 * s, 12 * s, 4 * s, 0, 0, TAU); c.fill();
+          c.fillStyle = col;
+          c.beginPath();
+          c.moveTo(-8 * s, 10 * s); c.lineTo(-8 * s, -6 * s);
+          c.arc(0, -6 * s, 8 * s, Math.PI, 0);
+          c.lineTo(8 * s, 10 * s); c.closePath(); c.fill();
+          break;
+        case 'tree':
+          c.fillStyle = 'rgba(0,0,0,0.35)';
+          c.beginPath(); c.ellipse(0, 16 * s, 16 * s, 5 * s, 0, 0, TAU); c.fill();
+          c.fillStyle = '#241a10';
+          c.fillRect(-3 * s, 2 * s, 6 * s, 14 * s);
+          c.fillStyle = col;
+          c.beginPath(); c.arc(0, -6 * s, 17 * s, 0, TAU); c.fill();
+          c.fillStyle = 'rgba(255,255,255,0.06)';
+          c.beginPath(); c.arc(-5 * s, -10 * s, 9 * s, 0, TAU); c.fill();
+          break;
+        case 'crystal': {
+          c.fillStyle = col;
+          c.globalAlpha = 0.9;
+          const spikes = 3;
+          for (let i = 0; i < spikes; i++) {
+            const a = (d.seed * 6 + i) * 2.1;
+            const h = (14 + i * 6) * s;
+            c.save(); c.rotate(Math.sin(a) * 0.4);
+            c.beginPath();
+            c.moveTo(0, 6 * s); c.lineTo(-5 * s, 0); c.lineTo(0, -h); c.lineTo(5 * s, 0);
+            c.closePath(); c.fill();
+            c.restore();
+          }
+          c.fillStyle = 'rgba(200,240,255,0.25)';
+          c.beginPath(); c.arc(0, -8 * s, 3 * s, 0, TAU); c.fill();
+          break;
+        }
+        case 'vent':
+          c.fillStyle = col;
+          c.beginPath(); c.ellipse(0, 0, 16 * s, 11 * s, 0, 0, TAU); c.fill();
+          c.fillStyle = `rgba(255,120,50,${0.35 + Math.sin(game.time * 3 + d.seed * 9) * 0.15})`;
+          c.beginPath(); c.ellipse(0, 0, 8 * s, 5 * s, 0, 0, TAU); c.fill();
+          break;
+        case 'shard': {
+          const bob = Math.sin(game.time * 1.5 + d.seed * 12) * 4;
+          c.translate(0, bob);
+          c.rotate(d.seed * TAU + game.time * 0.2);
+          c.globalAlpha = 0.7;
+          c.fillStyle = col;
+          c.beginPath();
+          c.moveTo(0, -14 * s); c.lineTo(8 * s, 6 * s); c.lineTo(-8 * s, 6 * s);
+          c.closePath(); c.fill();
+          c.strokeStyle = 'rgba(190,150,255,0.4)'; c.lineWidth = 1.5; c.stroke();
+          break;
+        }
+      }
+      c.restore();
     }
   }
 

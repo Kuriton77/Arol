@@ -60,7 +60,8 @@ export class HUD {
     c.font = 'bold 15px "Trebuchet MS", system-ui';
     c.fillStyle = '#ffd23f'; c.fillText(`◆ ${p.gold} gold`, W - 16, 16);
     c.fillStyle = '#b48cff'; c.fillText(`✦ ${game.save.data.souls} souls`, W - 16, 38);
-    c.fillStyle = '#cdd6e8'; c.fillText(`Floor ${game.floor}`, W - 16, 60);
+    c.fillStyle = '#cdd6e8';
+    c.fillText(`Floor ${game.floor}${game.biome ? ' — ' + game.biome.name : ''}`, W - 16, 60);
 
     // --- Minimap ---
     this._minimap(game, W - 168, 88);

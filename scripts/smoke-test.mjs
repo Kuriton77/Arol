@@ -227,6 +227,40 @@ assert(['playing', 'gameover', 'upgrade'].includes(enemyPhase.state), 'sim staye
 // Reset to sword for boss test.
 await page.evaluate(() => { const g = window.__AROL__; g.save.data.selectedWeapon = 'sword'; g.startRun(); });
 
+// --- Biomes: each floor themes rooms, enemies, hazards, decor ---
+const biomePhase = await page.evaluate(async () => {
+  const g = window.__AROL__;
+  const { BIOMES } = await import('./src/data/biomes.js');
+  const out = [];
+  g.startRun();
+  for (let floor = 1; floor <= BIOMES.length; floor++) {
+    g.floor = floor;
+    g._buildFloor();
+    const combat = g.dungeon.rooms.find((r) => r.type === 'combat');
+    g._enterRoom(combat, null, false);
+    // Are spawned enemies drawn from the biome roster?
+    const roster = new Set(g.biome.enemies);
+    const { ENEMY_TYPES } = await import('./src/data/enemies.js');
+    const typeOf = (e) => Object.keys(ENEMY_TYPES).find((k) => ENEMY_TYPES[k] === e.def);
+    const allInRoster = g.enemies.every((e) => roster.has(typeOf(e)));
+    // Step a second to ensure hazards/decor/ambient run clean.
+    for (let f = 0; f < 60; f++) g.update(1 / 60);
+    out.push({
+      biome: g.biome.id, boss: g.bossDef.id,
+      decor: (combat.decor || []).length,
+      hazards: g.hazards.count,
+      allInRoster,
+    });
+  }
+  return out;
+});
+console.log('  biome phase:', JSON.stringify(biomePhase));
+assert(biomePhase.length >= 6, `6 biomes cycle by floor (${biomePhase.length})`);
+assert(biomePhase.every((b) => b.allInRoster), 'combat spawns come from biome-exclusive rosters');
+assert(biomePhase.some((b) => b.decor > 0), 'biome decorations placed');
+assert(biomePhase.some((b) => b.hazards > 0), 'environmental hazards spawn');
+assert(new Set(biomePhase.map((b) => b.boss)).size === 6, 'each biome has its own boss');
+
 // --- All six bosses: instantiate, run patterns, emit attacks, no errors ---
 const bossResults = await page.evaluate(async () => {
   const g = window.__AROL__;
