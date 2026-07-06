@@ -3,7 +3,7 @@
 // crits, damage numbers, knockback, lifesteal, burn, chain lightning, thorns,
 // hit-pause, camera shake, particles and SFX. Systems above stay decoupled by
 // talking to this through a small context object.
-import { inArc, circlesOverlap, dist, clamp } from '../core/math.js';
+import { inArc, inThrust, circlesOverlap, dist, clamp } from '../core/math.js';
 import { CONFIG } from '../data/config.js';
 import { derive } from './Stats.js';
 
@@ -31,8 +31,14 @@ export class CombatSystem {
     const s = c.player.stats;
     const hpFrac = c.player.health / c.player.maxHealth;
     let dmg = baseDamage != null ? baseDamage : derive.damage(s, hpFrac);
+    if (opts.mult) dmg *= opts.mult;
+    // First-strike boons reward opening hits on untouched enemies.
+    if (s.firstStrikePct > 0 && target.health >= target.maxHealth) dmg *= 1 + s.firstStrikePct;
     const crit = Math.random() < s.critChance;
-    if (crit) dmg *= s.critMult;
+    if (crit) {
+      dmg *= s.critMult;
+      if (s.bleedOnCrit > 0) target.addBurn(dmg * 0.1 * s.bleedOnCrit, 2.5);
+    }
     dmg = Math.round(dmg);
 
     const applied = target.hurt(dmg);
@@ -88,38 +94,102 @@ export class CombatSystem {
     }
   }
 
+  // Resolve the player's current attack step by its hit shape. All weapons run
+  // through this one pipeline — arcs and thrusts scan targets, shot/bolt/nova
+  // steps emit pooled projectiles; blade-boon projectiles ride along for all.
   _playerMelee() {
     const c = this.ctx;
     const p = c.player;
     if (!p.isSwingActive()) return;
     const s = p.stats;
-    const range = derive.range(s);
-    const halfArc = derive.arc(s) / 2;
-    const targets = this._allTargets();
+    const step = p.currentStep || {};
+    const shape = step.shape || 'arc';
+    const stepMult = (step.dmg ?? 1) * (step.finisher ? s.finisherMult : 1);
+    const range = derive.range(s) * (step.rangeMult ?? 1);
+    const kb = derive.knockback(s) * (step.knockMult ?? 1);
 
-    for (const e of targets) {
-      if (!e.alive || p._hitThisSwing.has(e)) continue;
-      if (inArc(p.x, p.y, p.swingDir, halfArc, range, e.x, e.y, e.radius)) {
-        p._hitThisSwing.add(e);
-        this.dealDamage(e, null, p.x, p.y);
+    if (shape === 'arc' || shape === 'thrust') {
+      const halfArc = (derive.arc(s) * (step.arcMult ?? 1)) / 2;
+      const width = (p.weapon.base.width || 28) * (s.rangeMult > 1 ? 1 + (s.rangeMult - 1) * 0.5 : 1);
+      for (const e of this._allTargets()) {
+        if (!e.alive || p._hitThisSwing.has(e)) continue;
+        const hit = shape === 'thrust'
+          ? inThrust(p.x, p.y, p.swingDir, range, width, e.x, e.y, e.radius)
+          : inArc(p.x, p.y, p.swingDir, halfArc, range, e.x, e.y, e.radius);
+        if (hit) {
+          p._hitThisSwing.add(e);
+          this.dealDamage(e, null, p.x, p.y, { mult: stepMult, knockback: kb });
+          if (step.shake) c.camera.addShake(step.shake);
+        }
       }
     }
 
-    // Fire blade projectiles once per swing if the boon is owned.
-    if (s.projectiles > 0 && !p._firedProjectile) {
+    // Once-per-swing projectile emissions (weapon shots + boon blades).
+    if (!p._firedProjectile) {
       p._firedProjectile = true;
-      const n = s.projectiles;
-      const spread = s.projSpread;
-      for (let i = 0; i < n; i++) {
-        const off = n === 1 ? 0 : (i / (n - 1) - 0.5) * spread * n;
-        const a = p.swingDir + off;
-        c.projectiles.spawn({
-          x: p.x, y: p.y, vx: Math.cos(a) * 520, vy: Math.sin(a) * 520,
-          radius: 8, damage: derive.damage(s, p.health / p.maxHealth) * 0.6,
-          hostile: false, color: '#ffe08a', life: 0.9, pierce: 1, knockback: 120,
-        });
+      const dmgBase = derive.damage(s, p.health / p.maxHealth);
+
+      if (shape === 'shot' || shape === 'bolt') {
+        let n = step.count ?? 1;
+        if (step.volley) n += s.arrowExtra;
+        const spreadA = step.spreadA ?? 0;
+        const speed = p.weapon.base.projSpeed || 520;
+        for (let i = 0; i < n; i++) {
+          const off = n === 1 ? 0 : (i / (n - 1) - 0.5) * spreadA * (n - 1);
+          const a = p.swingDir + off;
+          c.projectiles.spawn({
+            x: p.x, y: p.y, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed,
+            radius: shape === 'bolt' ? 8 : 6,
+            damage: dmgBase * stepMult,
+            hostile: false, color: p.weapon.vfx.color,
+            life: 2.2, pierce: (step.pierce ?? 0) + s.arrowPierce, knockback: kb * 0.6,
+          });
+        }
+        c.audio.play(p.weapon.sfx);
+        if (step.shake) c.camera.addShake(step.shake);
+      } else if (shape === 'nova') {
+        const n = (step.count ?? 10) + s.novaExtra;
+        const speed = p.weapon.base.projSpeed || 430;
+        for (let i = 0; i < n; i++) {
+          const a = (i / n) * Math.PI * 2 + p.swingDir;
+          c.projectiles.spawn({
+            x: p.x, y: p.y, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed,
+            radius: 8, damage: dmgBase * stepMult,
+            hostile: false, color: p.weapon.vfx.color,
+            life: 1.4, pierce: s.arrowPierce, knockback: kb * 0.6,
+          });
+        }
+        c.particles.burst(p.x, p.y, p.weapon.vfx.color, 18, { speed: 260, life: 0.5 });
+        c.audio.play(p.weapon.sfx);
+        c.camera.addShake(step.shake || 3);
       }
-      c.audio.play('shoot');
+
+      // Greatsword Shockwave boon: finisher launches a heavy wave.
+      if (s.shockwave > 0 && step.finisher && (shape === 'arc' || shape === 'thrust')) {
+        c.projectiles.spawn({
+          x: p.x, y: p.y,
+          vx: Math.cos(p.swingDir) * 340, vy: Math.sin(p.swingDir) * 340,
+          radius: 16, damage: dmgBase * 0.8 * s.shockwave,
+          hostile: false, color: '#ffd9c0', life: 0.8, pierce: 99, knockback: kb,
+        });
+        c.audio.play('shoot');
+      }
+
+      // Blade-projector boon rides along with every weapon.
+      if (s.projectiles > 0) {
+        const n = s.projectiles;
+        const spread = s.projSpread;
+        for (let i = 0; i < n; i++) {
+          const off = n === 1 ? 0 : (i / (n - 1) - 0.5) * spread * n;
+          const a = p.swingDir + off;
+          c.projectiles.spawn({
+            x: p.x, y: p.y, vx: Math.cos(a) * 520, vy: Math.sin(a) * 520,
+            radius: 8, damage: dmgBase * 0.6,
+            hostile: false, color: '#ffe08a', life: 0.9, pierce: 1, knockback: 120,
+          });
+        }
+        c.audio.play('shoot');
+      }
     }
   }
 
@@ -183,6 +253,8 @@ export class CombatSystem {
     const c = this.ctx;
     const p = c.player;
     if (p.iframes > 0) return;
+    // Colossus boon: damage reduction while mid-swing.
+    if (p.stats.guardSwing && p.attackPhase !== 'idle') amount *= 0.75;
     const dmg = Math.round(amount);
     if (!p.hurt(dmg)) return;
     p.iframes = CONFIG.player.hurtIframes;

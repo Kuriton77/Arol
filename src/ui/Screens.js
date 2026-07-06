@@ -1,7 +1,8 @@
 // Full-screen overlay screens (menu, boon/shop selection, pause, game over,
 // victory). Uses the immediate-mode UI helper; reads/mutates Game via methods.
 import { GAME_STATE } from '../data/config.js';
-import { META_UPGRADES, WEAPONS } from '../data/meta.js';
+import { META_UPGRADES } from '../data/meta.js';
+import { WEAPONS } from '../data/weapons.js';
 import { RARITY } from '../data/upgrades.js';
 import { roundRect } from './UI.js';
 
@@ -55,31 +56,31 @@ export class Screens {
       y += 62;
     }
 
-    // Weapons (right).
+    // Weapons (right) — compact rows so all six fit.
     ui.panel(this.W - 324, 140, 300, 350);
     ui.text('WEAPON', this.W - 308, 166, { font: 'bold 14px system-ui', color: '#9fb2dd' });
-    y = 184;
+    y = 180;
     for (const w of WEAPONS) {
       const unlocked = g.save.isWeaponUnlocked(w.id);
       const selected = g.save.data.selectedWeapon === w.id;
       const x = this.W - 308;
       if (selected) {
         c.fillStyle = 'rgba(99,184,255,0.12)';
-        roundRect(c, x - 8, y - 4, 284, 74, 8); c.fill();
-        c.strokeStyle = '#63b8ff'; c.lineWidth = 2; roundRect(c, x - 8, y - 4, 284, 74, 8); c.stroke();
+        roundRect(c, x - 8, y - 3, 284, 46, 8); c.fill();
+        c.strokeStyle = '#63b8ff'; c.lineWidth = 2; roundRect(c, x - 8, y - 3, 284, 46, 8); c.stroke();
       }
-      ui.text(w.name + (selected ? '  ◄' : ''), x, y + 14, { font: 'bold 15px system-ui', color: unlocked ? '#e8ecf5' : '#7a86a2' });
-      ui.text(w.desc, x, y + 32, { font: '11px system-ui', color: '#8ea0c4' });
-      const label = unlocked ? (selected ? 'EQUIPPED' : 'EQUIP') : `${w.cost}✦`;
+      ui.text(w.name, x, y + 14, { font: 'bold 13px system-ui', color: unlocked ? '#e8ecf5' : '#7a86a2' });
+      ui.text(w.desc, x, y + 30, { font: '10px system-ui', color: '#8ea0c4' });
+      const label = unlocked ? (selected ? 'USING' : 'EQUIP') : `${w.cost}✦`;
       const affordable = unlocked || g.save.data.souls >= w.cost;
-      if (ui.button(x + 176, y + 8, 88, 34, label, {
+      if (ui.button(x + 200, y + 5, 66, 30, label, {
         color: selected ? '#24405f' : affordable ? '#2a3a66' : '#232436',
-        font: 'bold 12px system-ui',
+        font: 'bold 11px system-ui',
       })) {
         if (unlocked) g.save.selectWeapon(w.id);
         else if (affordable) { g.save.spendSouls(w.cost); g.save.unlockWeapon(w.id); g.save.selectWeapon(w.id); }
       }
-      y += 84;
+      y += 51;
     }
 
     // Start + controls.

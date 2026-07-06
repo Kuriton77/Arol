@@ -257,22 +257,54 @@ export class Renderer {
       c.globalAlpha = 1;
     }
 
-    // Swing arc.
+    // Weapon attack visuals — shape-specific per combo step.
     if (p.attackPhase === 'active' || p.attackPhase === 'windup') {
-      const range = derive.range(p.stats);
-      const half = derive.arc(p.stats) / 2;
-      const prog = p.attackPhase === 'active' ? p.swingProgress : 0;
+      const step = p.currentStep || {};
+      const shape = step.shape || 'arc';
+      const color = (p.weapon.vfx && p.weapon.vfx.color) || '#dff0ff';
+      const range = derive.range(p.stats) * (step.rangeMult ?? 1);
       c.save();
       c.translate(p.x, p.y);
-      c.globalAlpha = p.attackPhase === 'active' ? 0.5 : 0.18;
-      c.fillStyle = '#dff0ff';
-      const a0 = p.swingDir - half;
-      const a1 = p.swingDir - half + (half * 2) * (p.attackPhase === 'active' ? prog : 1);
-      c.beginPath();
-      c.moveTo(0, 0);
-      c.arc(0, 0, range, a0, a1);
-      c.closePath();
-      c.fill();
+      if (shape === 'arc') {
+        const half = (derive.arc(p.stats) * (step.arcMult ?? 1)) / 2;
+        const prog = p.attackPhase === 'active' ? p.swingProgress : 0;
+        c.globalAlpha = p.attackPhase === 'active' ? 0.5 : 0.18;
+        c.fillStyle = color;
+        // Alternating combo steps sweep in the reverse direction.
+        const sweep = half * 2 * (p.attackPhase === 'active' ? prog : 1);
+        const a0 = step.reversed ? p.swingDir + half - sweep : p.swingDir - half;
+        c.beginPath();
+        c.moveTo(0, 0);
+        c.arc(0, 0, range, a0, a0 + sweep);
+        c.closePath();
+        c.fill();
+      } else if (shape === 'thrust') {
+        const w = (p.weapon.base.width || 28) / 2;
+        const ext = p.attackPhase === 'active' ? (0.35 + 0.65 * p.swingProgress) : 0.2;
+        c.rotate(p.swingDir);
+        c.globalAlpha = p.attackPhase === 'active' ? 0.6 : 0.2;
+        c.fillStyle = color;
+        c.beginPath();
+        c.moveTo(p.radius, -w * 0.6);
+        c.lineTo(range * ext, -w * 0.25);
+        c.lineTo(range * ext + 10, 0);
+        c.lineTo(range * ext, w * 0.25);
+        c.lineTo(p.radius, w * 0.6);
+        c.closePath();
+        c.fill();
+      } else if (shape === 'shot' || shape === 'bolt' || shape === 'nova') {
+        // Draw/charge indicator during windup; muzzle flash on release.
+        c.rotate(p.swingDir);
+        c.globalAlpha = p.attackPhase === 'windup' ? 0.5 : 0.3;
+        c.strokeStyle = color; c.fillStyle = color; c.lineWidth = 2;
+        if (shape === 'shot') {
+          c.beginPath(); c.arc(p.radius + 6, 0, 9, -1.2, 1.2); c.stroke();
+          c.beginPath(); c.moveTo(p.radius + 2, -8); c.lineTo(p.radius + 2, 8); c.stroke();
+        } else {
+          const r = p.attackPhase === 'windup' ? 5 + 5 * (1 - p.attackTimer / (step.windup || 0.12)) : 7;
+          c.beginPath(); c.arc(p.radius + 10, 0, r, 0, TAU); c.fill();
+        }
+      }
       c.restore();
     }
 

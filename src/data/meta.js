@@ -28,21 +28,4 @@ export const META_UPGRADES = [
   },
 ];
 
-// Unlockable starting weapons. The first is free/default; others cost Souls once.
-export const WEAPONS = [
-  {
-    id: 'sword', name: 'Iron Sword', cost: 0, unlockedByDefault: true,
-    desc: 'Balanced all-rounder.',
-    stats: { damage: 18, cooldown: 0.34, range: 58, arc: 0.85, knockback: 260 },
-  },
-  {
-    id: 'dagger', name: 'Twin Daggers', cost: 60,
-    desc: 'Fast. Short reach. Crits.',
-    stats: { damage: 11, cooldown: 0.19, range: 46, arc: 0.7, knockback: 150, critBonus: 0.08 },
-  },
-  {
-    id: 'greatsword', name: 'Greatsword', cost: 90,
-    desc: 'Slow. Huge arc & knockback.',
-    stats: { damage: 36, cooldown: 0.6, range: 74, arc: 1.25, knockback: 460 },
-  },
-];
+// Weapon definitions moved to weapons.js (full modular weapon framework).

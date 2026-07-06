@@ -42,6 +42,22 @@ export function inArc(ox, oy, facing, halfArc, range, px, py, targetRadius = 0) 
   return Math.abs(angleDelta(facing, a)) <= halfArc;
 }
 
+// Squared distance from point P to segment AB. Used for thrust (capsule) hits.
+export function pointSegDist2(px, py, ax, ay, bx, by) {
+  const abx = bx - ax, aby = by - ay;
+  const t = Math.max(0, Math.min(1, ((px - ax) * abx + (py - ay) * aby) / (abx * abx + aby * aby || 1)));
+  const cx = ax + abx * t, cy = ay + aby * t;
+  return dist2(px, py, cx, cy);
+}
+
+// Is a circle (px,py,r) inside a thrust capsule from origin along `facing`?
+export function inThrust(ox, oy, facing, length, width, px, py, r = 0) {
+  const bx = ox + Math.cos(facing) * length;
+  const by = oy + Math.sin(facing) * length;
+  const reach = width / 2 + r;
+  return pointSegDist2(px, py, ox, oy, bx, by) <= reach * reach;
+}
+
 // Seeded, deterministic PRNG (mulberry32) so a run is reproducible from a seed.
 export function makeRng(seed) {
   let s = seed >>> 0;

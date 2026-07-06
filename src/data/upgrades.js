@@ -98,8 +98,9 @@ export const UPGRADES = [
 ];
 
 // Weighted random draw of `n` distinct upgrades, honouring stackability.
-export function drawUpgrades(rng, n, ownedCounts) {
-  const pool = UPGRADES.filter((u) => u.stackable || !(ownedCounts[u.id] > 0));
+// `sourcePool` lets callers mix in weapon-exclusive (and later relic) pools.
+export function drawUpgrades(rng, n, ownedCounts, sourcePool = UPGRADES) {
+  const pool = sourcePool.filter((u) => u.stackable || !(ownedCounts[u.id] > 0));
   const picks = [];
   const available = [...pool];
   for (let i = 0; i < n && available.length; i++) {

@@ -84,6 +84,9 @@ export class AudioManager {
     if (!this.ctx || this._muted) return;
     switch (name) {
       case 'swing':   this._tone(520, 0.09, 'sawtooth', 0.12, null, -260); break;
+      case 'thrust':  this._tone(700, 0.07, 'sawtooth', 0.11, null, -420); break;
+      case 'bow':     this._tone(320, 0.12, 'sine', 0.18, null, -220); this._noise(0.04, 0.08, 5000); break;
+      case 'bolt':    this._tone(840, 0.16, 'sine', 0.14, null, 300); this._tone(420, 0.12, 'triangle', 0.1, null, 160); break;
       case 'hit':     this._tone(180, 0.08, 'square', 0.25, null, -90); this._noise(0.06, 0.15, 2200); break;
       case 'crit':    this._tone(320, 0.12, 'square', 0.3, null, 180); this._noise(0.08, 0.2, 3000); break;
       case 'hurt':    this._tone(140, 0.22, 'sawtooth', 0.3, null, -80); break;

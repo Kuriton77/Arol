@@ -100,6 +100,45 @@ assert(snap.kills > 0, `player killed enemies (${snap.kills})`);
 assert(['playing', 'upgrade', 'gameover', 'victory'].includes(snap.state), 'game in a valid state after sim');
 await page.screenshot({ path: `${OUT}/02-combat.png` });
 
+// --- Weapon framework: every weapon must fight through the shared pipeline ---
+const weaponResults = await page.evaluate(() => {
+  const g = window.__AROL__;
+  const results = {};
+  const ids = ['sword', 'greatsword', 'dagger', 'spear', 'bow', 'staff'];
+  for (const id of ids) {
+    g.save.data.selectedWeapon = id;
+    g.save.data.unlockedWeapons = ids;
+    g.startRun();
+    // Enter the first room that needs clearing so enemies exist.
+    const combat = g.dungeon.rooms.find((r) => r.type === 'combat');
+    g._enterRoom(combat, null, false);
+    const hpBefore = g.enemies.reduce((s, e) => s + e.health, 0);
+    for (let f = 0; f < 60 * 6; f++) {
+      const inp = g.input;
+      inp.keys.clear();
+      let tx = 480, ty = 270;
+      if (g.enemies.length) { tx = g.enemies[0].x; ty = g.enemies[0].y; }
+      if (tx > g.player.x + 4) inp.keys.add('d'); else if (tx < g.player.x - 4) inp.keys.add('a');
+      if (ty > g.player.y + 4) inp.keys.add('s'); else if (ty < g.player.y - 4) inp.keys.add('w');
+      inp.mouse.x = tx; inp.mouse.y = ty; inp.mouse.down = true;
+      g.update(1 / 60);
+      if (g.state === 'upgrade') {
+        if (g.shopMode) g._closeShop();
+        else g._pickUpgrade(g.upgradeChoices[0]);
+      }
+      if (g.state !== 'playing') break;
+    }
+    const hpAfter = g.enemies.reduce((s, e) => s + e.health, 0);
+    results[id] = { dealt: hpBefore - hpAfter + (g.kills > 0 ? 1 : 0), combo: g.player.comboIndex, kills: g.kills };
+  }
+  return results;
+});
+for (const [id, r] of Object.entries(weaponResults)) {
+  assert(r.dealt > 0, `weapon '${id}' deals damage (${Math.round(r.dealt)})`);
+}
+// Reset to sword for boss test.
+await page.evaluate(() => { const g = window.__AROL__; g.save.data.selectedWeapon = 'sword'; g.startRun(); });
+
 // --- Force a boss room to validate boss systems ---
 await page.evaluate(() => {
   const g = window.__AROL__;

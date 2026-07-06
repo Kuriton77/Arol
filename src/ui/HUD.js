@@ -44,6 +44,16 @@ export class HUD {
     c.fillText('⇥', 0, 1);
     c.restore();
 
+    // --- Combo chain pips ---
+    const steps = p.weapon.combo.length;
+    const active = p.comboTimer > 0 ? p.comboIndex : 0;
+    for (let i = 0; i < steps; i++) {
+      c.fillStyle = i < active ? '#ffd23f' : 'rgba(120,130,170,0.35)';
+      c.beginPath();
+      c.arc(330 + i * 13, 24, 4, 0, Math.PI * 2);
+      c.fill();
+    }
+
     // --- Currency / floor (top-right) ---
     const W = c.canvas.width;
     c.textAlign = 'right'; c.textBaseline = 'top';

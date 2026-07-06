@@ -14,7 +14,8 @@ import { SpawnSystem } from '../systems/SpawnSystem.js';
 import { generateDungeon } from '../dungeon/Generator.js';
 import { DIRS } from '../dungeon/Room.js';
 import { drawUpgrades, UPGRADES, RARITY } from '../data/upgrades.js';
-import { META_UPGRADES, WEAPONS } from '../data/meta.js';
+import { META_UPGRADES } from '../data/meta.js';
+import { WEAPONS, weaponById } from '../data/weapons.js';
 import { Renderer } from '../render/Renderer.js';
 import { HUD } from '../ui/HUD.js';
 import { UI } from '../ui/UI.js';
@@ -125,8 +126,10 @@ export class Game {
     this.ownedUpgrades = [];
     this.ownedCounts = {};
 
-    const weapon = WEAPONS.find((w) => w.id === this.save.data.selectedWeapon) || WEAPONS[0];
+    const weapon = weaponById(this.save.data.selectedWeapon);
     this.player = new Player(CONFIG.world.width / 2, CONFIG.world.height / 2, weapon);
+    // Boon pool for this run = shared upgrades + the equipped weapon's pool.
+    this.boonPool = [...UPGRADES, ...(weapon.upgrades || [])];
     this._applyMeta(this.player.stats);
     this.player.refreshMaxHealth();
     this.player.health = this.player.maxHealth;
@@ -264,7 +267,7 @@ export class Game {
   _openNextUpgrade() {
     if (this.upgradeQueue <= 0) { this._setState(GAME_STATE.PLAYING); return; }
     this.shopMode = false;
-    this.upgradeChoices = drawUpgrades(this.rng, CONFIG.progression.upgradesOnLevel, this.ownedCounts);
+    this.upgradeChoices = drawUpgrades(this.rng, CONFIG.progression.upgradesOnLevel, this.ownedCounts, this.boonPool);
     if (!this.upgradeChoices.length) { this.upgradeQueue = 0; this._setState(GAME_STATE.PLAYING); return; }
     this._setState(GAME_STATE.UPGRADE);
   }
@@ -311,7 +314,7 @@ export class Game {
 
   _openShop() {
     this.shopMode = true;
-    const picks = drawUpgrades(this.rng, 3, this.ownedCounts);
+    const picks = drawUpgrades(this.rng, 3, this.ownedCounts, this.boonPool);
     const costBase = { common: 8, rare: 14, epic: 22, legendary: 35 };
     this.shopItems = picks.map((u) => ({
       upgrade: u,
@@ -377,6 +380,8 @@ export class Game {
     this.audio.play('die');
     this.kills++;
     this.soulsEarned += 1;
+    // Resonance boon: kills grant a short attack-speed surge.
+    if (this.player.stats.surgeOnKill) this.player.stats.surgeT = 3.0;
 
     if (target === this.boss) {
       this.player.gold += Math.round(target.def.gold * greed);
@@ -485,7 +490,11 @@ export class Game {
       if (p.tryDash(axis.x, axis.y)) { this.audio.play('dash'); this.camera.addShake(2); }
     }
     if (input.mouse.down) {
-      if (p.tryAttack(input.mouse.x, input.mouse.y)) this.audio.play('swing');
+      // Shot/bolt steps play their SFX at fire time in CombatSystem.
+      if (p.tryAttack(input.mouse.x, input.mouse.y)) {
+        const shape = p.currentStep.shape || 'arc';
+        if (shape === 'arc' || shape === 'thrust') this.audio.play(p.weapon.sfx || 'swing');
+      }
     }
     p.update(dt, input, bounds);
 
