@@ -17,9 +17,11 @@ import { drawUpgrades, UPGRADES, RARITY } from '../data/upgrades.js';
 import { RELICS, relicById } from '../data/relics.js';
 import { META_TREE, applyMastery, masteryLevel, SMITH_BONUS, ACHIEVEMENTS } from '../data/meta.js';
 import { WEAPONS, weaponById } from '../data/weapons.js';
+import { ENEMY_TYPES } from '../data/enemies.js';
 import { bossById } from '../data/bosses.js';
 import { biomeForFloor } from '../data/biomes.js';
 import { eventById } from '../data/events.js';
+import { pactMods, totalHeat, SOUL_BONUS_PER_HEAT, HEAT_MILESTONES } from '../data/pacts.js';
 import { SynergySystem } from '../systems/SynergySystem.js';
 import { Hazards } from '../fx/Hazards.js';
 import { Renderer } from '../render/Renderer.js';
@@ -146,6 +148,11 @@ export class Game {
     this.player = new Player(CONFIG.world.width / 2, CONFIG.world.height / 2, weapon);
     // Boon pool for this run = shared upgrades + the equipped weapon's pool.
     this.boonPool = [...UPGRADES, ...(weapon.upgrades || [])];
+    // Difficulty pacts chosen in the hub.
+    this.pactMods = pactMods(this.save.data.pacts);
+    this.heat = totalHeat(this.save.data.pacts);
+    this.player.stats.maxHealthBonus -= this.pactMods.maxHpLoss;
+    this.player.stats.healMult = this.pactMods.healMult;
     this._applyMeta(this.player.stats);
     // Weapon mastery + blacksmith forging (permanent, per-weapon).
     applyMastery(this.player.stats, masteryLevel(this.save.weaponKills(weapon.id)));
@@ -187,6 +194,8 @@ export class Game {
     this.bossDef = bossById(this.biome.bossId);
     this.dungeon = generateDungeon(this.rng, this.floor - 1, this.biome);
     this._ambientT = 0;
+    this.floorTime = 0;
+    this._hourglassTriggered = false;
     this.enemies = [];
     this.boss = null;
     this.projectiles.clear();
@@ -230,6 +239,7 @@ export class Game {
       const { enemies, boss } = this.spawnSystem.spawnRoom(room, this.floor - 1, this.player, this.bossDef);
       this.enemies = enemies;
       this.boss = boss;
+      this._applyPactsToSpawns(room);
       room.locked = true;
       if (boss) {
         this.audio.setMood('boss', this.bossDef.musicScale);
@@ -250,6 +260,41 @@ export class Game {
         this.prompt = 'The dungeon awaits...';
       }
     }
+  }
+
+  // Difficulty pacts: reshape freshly-spawned encounters.
+  _applyPactsToSpawns(room) {
+    const m = this.pactMods;
+    if (!m) return;
+    // Legion: extra copies of existing enemies.
+    if (m.legionExtra > 0) {
+      const extra = [];
+      const depth = room.depth + (this.floor - 1) * 4;
+      for (const e of this.enemies) {
+        if (this.rng.chance(m.legionExtra) && this.enemies.length + extra.length < 50) {
+          extra.push(...this.spawnSystem.spawnPlan(
+            [{ type: this._typeOf(e), count: 1 }], room.bounds, this.player, depth));
+        }
+      }
+      this.enemies.push(...extra);
+    }
+    for (const e of this.enemies) {
+      if (m.enemySpeed !== 1) e.speed *= m.enemySpeed;
+      if (m.eliteChance > 0 && !e.isElite && this.rng.chance(m.eliteChance)) e.makeElite();
+      if (this._hourglassPenalty) e.damage *= this._hourglassPenalty;
+    }
+    if (this.boss && m.bossMult !== 1) {
+      this.boss.maxHealth = Math.round(this.boss.maxHealth * m.bossMult);
+      this.boss.health = this.boss.maxHealth;
+      this.boss.contactDamage *= m.bossMult;
+      this.boss.projDamage = Math.round(this.boss.projDamage * m.bossMult);
+    }
+  }
+
+  _typeOf(e) {
+    // Reverse-lookup an enemy's archetype key from its def reference.
+    for (const [k, v] of Object.entries(ENEMY_TYPES)) if (v === e.def) return k;
+    return 'melee';
   }
 
   _rewardPrompt(reward) {
@@ -545,7 +590,17 @@ export class Game {
     if (this._runCommitted) return;
     this._runCommitted = true;
     const greed = 1 + (this.player.stats.greed || 0);
-    const souls = Math.round((this.soulsEarned + (won ? 40 : 0)) * greed);
+    const heatMult = 1 + (this.heat || 0) * SOUL_BONUS_PER_HEAT;
+    let souls = Math.round((this.soulsEarned + (won ? 40 : 0)) * greed * heatMult);
+    if (won && this.heat > 0) {
+      for (const m of HEAT_MILESTONES) {
+        if (this.heat >= m.heat && !this.save.data.heatMilestones.includes(m.heat)) {
+          this.save.data.heatMilestones.push(m.heat);
+          souls += m.souls;
+          this._newFeats.push({ name: `Heat ${m.heat} Conquered`, souls: m.souls });
+        }
+      }
+    }
     this._lastSouls = souls;
     this.save.addSouls(souls);
     this.save.recordRun({
@@ -666,7 +721,12 @@ export class Game {
       player: p,
       bounds,
       enemies: () => this.enemies,
-      spawnProjectile: (o) => this.projectiles.spawn(o),
+      spawnProjectile: (o) => {
+        if (o.hostile && this.pactMods && this.pactMods.projSpeed !== 1) {
+          o.vx *= this.pactMods.projSpeed; o.vy *= this.pactMods.projSpeed;
+        }
+        return this.projectiles.spawn(o);
+      },
       spawnEnemy: (type, x, y) => {
         if (this.enemies.length < 60) {
           const e = this.spawnSystem.spawnAt(type, x, y, bounds, this.floor - 1);
@@ -736,6 +796,20 @@ export class Game {
     this.particles.update(dt);
     this.damageNumbers.update(dt);
     this.camera.update(dt);
+
+    // Pact of the Hourglass: floor timer empowers enemies when it expires.
+    if (this.pactMods && this.pactMods.hourglass) {
+      this.floorTime += dt;
+      if (!this._hourglassTriggered && this.floorTime > 180) {
+        this._hourglassTriggered = true;
+        this._hourglassPenalty = 1.3;
+        for (const e of this.enemies) e.damage *= 1.3;
+        if (this.boss) { this.boss.contactDamage *= 1.3; this.boss.projDamage = Math.round(this.boss.projDamage * 1.3); }
+        this.prompt = '⏳ The hourglass runs dry — the dungeon\'s wrath grows!';
+        this.audio.play('bossroar');
+        this.camera.addShake(8);
+      }
+    }
 
     // --- event fights (rooms that aren't needsClearing) ---
     if (this.eventFight) {

@@ -62,9 +62,18 @@ export class HUD {
     c.fillStyle = '#b48cff'; c.fillText(`✦ ${game.save.data.souls} souls`, W - 16, 38);
     c.fillStyle = '#cdd6e8';
     c.fillText(`Floor ${game.floor}${game.biome ? ' — ' + game.biome.name : ''}`, W - 16, 60);
+    if (game.heat > 0) {
+      c.fillStyle = '#ff9a5a';
+      let heatLine = `🔥 Heat ${game.heat}`;
+      if (game.pactMods && game.pactMods.hourglass) {
+        const left = Math.max(0, 180 - game.floorTime);
+        heatLine += `  ·  ⏳ ${Math.floor(left / 60)}:${String(Math.floor(left % 60)).padStart(2, '0')}`;
+      }
+      c.fillText(heatLine, W - 16, 80);
+    }
 
     // --- Minimap ---
-    this._minimap(game, W - 168, 88);
+    this._minimap(game, W - 168, game.heat > 0 ? 106 : 88);
 
     // --- Boss health bar ---
     if (game.boss && game.boss.alive) this._bossBar(game);

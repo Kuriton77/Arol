@@ -28,6 +28,16 @@ export class Renderer {
     // Death particles / lingering fx already in particles.
     game.damageNumbers.render(c);
 
+    // Pact of Darkness: the dungeon dims beyond the player's torchlight.
+    if (game.pactMods && game.pactMods.darkness && game.player) {
+      const p = game.player;
+      const grad = c.createRadialGradient(p.x, p.y, 90, p.x, p.y, 300);
+      grad.addColorStop(0, 'rgba(2,3,8,0)');
+      grad.addColorStop(1, 'rgba(2,3,8,0.93)');
+      c.fillStyle = grad;
+      c.fillRect(0, 0, CONFIG.world.width, CONFIG.world.height);
+    }
+
     c.restore();
   }
 

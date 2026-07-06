@@ -15,6 +15,8 @@ const DEFAULT = {
   weaponMastery: {},      // weaponId -> { kills }
   smith: {},              // weaponId -> forge level
   achievements: [],       // earned achievement ids
+  pacts: {},              // pactId -> rank (difficulty modifiers)
+  heatMilestones: [],     // claimed heat-victory bonuses
   stats: {
     runs: 0, wins: 0, kills: 0, bestDepth: 0,
     bestLevel: 0, lifetimeSouls: 0, bossesDefeated: {},

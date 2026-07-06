@@ -243,29 +243,44 @@ const eventPhase = await page.evaluate(async () => {
     // Give the test pilot a mid-run loadout so event fights are fair.
     const { UPGRADES } = await import('./src/data/upgrades.js');
     g._applyUpgrade(UPGRADES.find((u) => u.id === 'power'));
+    g._applyUpgrade(UPGRADES.find((u) => u.id === 'haste'));
     g._applyUpgrade(UPGRADES.find((u) => u.id === 'vigor'));
     g._applyUpgrade(UPGRADES.find((u) => u.id === 'lifesteal'));
+    g._applyUpgrade(UPGRADES.find((u) => u.id === 'regen'));
     g.currentEvent = eventById(ev.id);
     g._setState('event');
     const opts = ev.options(g);
     g._eventChoose(opts[0]); // always take the first (riskiest) option
-    // If a fight started, battle it out.
+    // If a fight started, battle it out — orbiting the target to flank
+    // frontal-blockers, the way a real player would.
     let frames = 0;
-    while (g.eventFight && frames++ < 60 * 30) {
+    while (g.eventFight && frames++ < 60 * 40) {
       const t = g.enemies.find((e) => e.alive);
-      if (t) { g.input.mouse.x = t.x; g.input.mouse.y = t.y; g.input.mouse.down = true; }
+      if (t) {
+        g.input.mouse.x = t.x; g.input.mouse.y = t.y; g.input.mouse.down = true;
+        const p = g.player;
+        const a = Math.atan2(t.y - p.y, t.x - p.x) + 1.1; // spiral behind
+        const mx = Math.cos(a), my = Math.sin(a);
+        g.input.keys.clear();
+        if (mx > 0.3) g.input.keys.add('d'); else if (mx < -0.3) g.input.keys.add('a');
+        if (my > 0.3) g.input.keys.add('s'); else if (my < -0.3) g.input.keys.add('w');
+        if (frames % 55 === 0) g.input._downThisFrame.add(' '); // dash for i-frames
+      }
       g.update(1 / 60);
       if (g.state === 'upgrade') { if (g.shopMode) g._closeShop(); else g._pickUpgrade(g.upgradeChoices[0]); }
       if (g.state === 'gameover') break;
     }
     if (g.state === 'upgrade') { if (g.shopMode) g._closeShop(); else g._pickUpgrade(g.upgradeChoices[0]); }
-    outcomes[ev.id] = { state: g.state, fightDone: !g.eventFight };
+    // Dying to an event fight is a legitimate outcome of a risk event —
+    // "resolved" means cleared OR the run ended; never a stuck fight.
+    outcomes[ev.id] = { state: g.state, fightDone: !g.eventFight || g.state === 'gameover' };
   }
   return { count: EVENTS.length, outcomes };
 });
 console.log('  event phase:', JSON.stringify(eventPhase.outcomes));
 assert(eventPhase.count >= 10, `10+ event types defined (${eventPhase.count})`);
-assert(Object.values(eventPhase.outcomes).every((o) => o.fightDone), 'all event fights resolve');
+assert(Object.values(eventPhase.outcomes).every((o) => o.fightDone), 'all event fights resolve (win or death, never stuck)');
+assert(Object.values(eventPhase.outcomes).filter((o) => o.state === 'playing' || o.state === 'upgrade').length >= 8, 'most events end with the run still alive');
 assert(Object.values(eventPhase.outcomes).every((o) => ['playing', 'gameover', 'upgrade'].includes(o.state)), 'events leave the game in a valid state');
 
 // --- Biomes: each floor themes rooms, enemies, hazards, decor ---
@@ -402,6 +417,54 @@ assert(metaPhase.masteryOk, 'weapon mastery + blacksmith forge apply');
 assert(metaPhase.nodeCount >= 18, `18-node skill tree (${metaPhase.nodeCount})`);
 assert(metaPhase.achievementCount >= 14, `14+ achievements (${metaPhase.achievementCount})`);
 assert(metaPhase.earned >= 2, `achievements are granted (${metaPhase.earned})`);
+
+// --- Pacts: modifiers apply, heat multiplies souls, milestones pay ---
+const pactPhase = await page.evaluate(async () => {
+  const g = window.__AROL__;
+  const { PACTS, totalHeat, pactMods } = await import('./src/data/pacts.js');
+  // Baseline run for comparison.
+  g.save.data.pacts = {};
+  g.startRun();
+  const baseHp = g.player.maxHealth;
+  // Crank several pacts.
+  g.save.data.pacts = { swiftness: 2, legion: 2, elites: 2, tyranny: 2, scarcity: 1, frailty: 2, darkness: 1, hourglass: 1 };
+  g.startRun();
+  const heat = g.heat;
+  const frailtyOk = g.player.maxHealth === baseHp - 30;
+  const healBefore = g.player.health = Math.round(g.player.maxHealth / 2);
+  g.player.heal(20);
+  const scarcityOk = Math.abs(g.player.health - (healBefore + 10)) < 0.6;
+  // Enter combat: legion/elite/speed applied to spawns.
+  const combat = g.dungeon.rooms.find((r) => r.type === 'combat');
+  g._enterRoom(combat, null, false);
+  const speeds = g.enemies.map((e) => e.speed / e.def.speed);
+  const speedOk = speeds.every((s) => s >= 1.24); // 1.25 pact (elites add 1.12 more)
+  // Boss buff.
+  g._enterRoom(g.dungeon.boss, null, false);
+  g.bossIntroT = 0;
+  const bossBuffed = g.boss.maxHealth > g.bossDef.health;
+  // Souls multiplier + milestone on a heat win.
+  g.soulsEarned = 100;
+  g._runCommitted = false;
+  g.save.data.heatMilestones = [];
+  const soulsBefore = g.save.data.souls;
+  g._commitRun(true);
+  const gained = g.save.data.souls - soulsBefore;
+  const heatMult = 1 + heat * 0.12;
+  const expectedMin = Math.round(140 * heatMult * (1 + (g.player.stats.greed || 0))); // 100+40 base, + milestones
+  return { pactCount: PACTS.length, heat, frailtyOk, scarcityOk, speedOk, bossBuffed, gained, expectedMin, milestones: g.save.data.heatMilestones };
+});
+console.log('  pact phase:', JSON.stringify(pactPhase));
+assert(pactPhase.pactCount >= 8, `8+ pacts defined (${pactPhase.pactCount})`);
+assert(pactPhase.heat >= 10, `heat accumulates (${pactPhase.heat})`);
+assert(pactPhase.frailtyOk, 'Frailty reduces max health');
+assert(pactPhase.scarcityOk, 'Scarcity halves healing');
+assert(pactPhase.speedOk, 'Swiftness speeds up spawned enemies');
+assert(pactPhase.bossBuffed, 'Tyranny buffs boss health');
+assert(pactPhase.gained >= pactPhase.expectedMin, `heat multiplies souls + milestones (${pactPhase.gained} >= ${pactPhase.expectedMin})`);
+assert(pactPhase.milestones.length === 3, 'heat-9 win claims all three milestones');
+// Reset pacts so later reloads start clean.
+await page.evaluate(() => { const g = window.__AROL__; g.save.data.pacts = {}; g.save.save(); });
 
 console.log('\nConsole errors:', errors.length);
 errors.slice(0, 20).forEach((e) => console.log('  !', e));

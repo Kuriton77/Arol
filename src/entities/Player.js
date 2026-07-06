@@ -162,6 +162,8 @@ export class Player extends Entity {
   }
 
   heal(amount) {
-    this.health = Math.min(this.maxHealth, this.health + amount);
+    // Pact of Scarcity (and similar) scale all healing received.
+    const mult = this.stats.healMult ?? 1;
+    this.health = Math.min(this.maxHealth, this.health + amount * mult);
   }
 }

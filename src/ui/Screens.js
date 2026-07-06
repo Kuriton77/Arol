@@ -7,12 +7,14 @@ import {
 } from '../data/meta.js';
 import { WEAPONS } from '../data/weapons.js';
 import { RARITY } from '../data/upgrades.js';
+import { PACTS, totalHeat, SOUL_BONUS_PER_HEAT, HEAT_MILESTONES } from '../data/pacts.js';
 import { roundRect } from './UI.js';
 
 const TABS = [
   { id: 'play', label: 'PLAY' },
   { id: 'sanctum', label: 'SANCTUM' },
   { id: 'armory', label: 'ARMORY' },
+  { id: 'pact', label: 'PACT' },
   { id: 'feats', label: 'FEATS' },
 ];
 
@@ -54,8 +56,48 @@ export class Screens {
       case 'play': this._tabPlay(); break;
       case 'sanctum': this._tabSanctum(); break;
       case 'armory': this._tabArmory(); break;
+      case 'pact': this._tabPact(); break;
       case 'feats': this._tabFeats(); break;
     }
+  }
+
+  // Difficulty pacts: rank pickers, live heat total, reward preview.
+  _tabPact() {
+    const c = this.ctx, ui = this.ui, g = this.game;
+    const heat = totalHeat(g.save.data.pacts);
+    const x = this.W / 2 - 390, w = 780;
+    ui.panel(x, 146, w, 374);
+    ui.text(`🔥 HEAT ${heat}`, this.W / 2 - 180, 174, { font: 'bold 20px system-ui', align: 'center', color: heat > 0 ? '#ff7b4a' : '#71809f' });
+    ui.text(`souls +${Math.round(heat * SOUL_BONUS_PER_HEAT * 100)}%`, this.W / 2 + 40, 174, { font: 'bold 14px system-ui', align: 'center', color: '#b48cff' });
+    const nextMile = HEAT_MILESTONES.find((m) => !g.save.data.heatMilestones.includes(m.heat));
+    ui.text(nextMile ? `win at heat ${nextMile.heat} → +${nextMile.souls}✦ bonus` : 'all heat milestones conquered',
+      this.W / 2 + 240, 174, { font: '12px system-ui', align: 'center', color: '#8ea0c4' });
+
+    const colW = 380;
+    PACTS.forEach((p, i) => {
+      const col = i % 2, row = Math.floor(i / 2);
+      const px = x + 20 + col * colW, py = 194 + row * 64;
+      const rank = g.save.data.pacts[p.id] || 0;
+      ui.text(p.name, px, py + 12, { font: 'bold 13px system-ui', color: rank > 0 ? '#ffb47a' : '#c3cee6' });
+      ui.text(rank > 0 ? p.ranks[rank - 1] : p.ranks[0], px, py + 29, { font: '11px system-ui', color: rank > 0 ? '#d8a88a' : '#71809f' });
+      // Rank pips: click a pip to set the rank (click current rank to clear).
+      for (let r = 1; r <= p.ranks.length; r++) {
+        const bx = px + 250 + (r - 1) * 40;
+        const on = rank >= r;
+        if (ui.button(bx, py + 2, 34, 30, String(r), {
+          color: on ? '#7a3a20' : '#232436',
+          hoverColor: on ? '#9c4c28' : '#323a56',
+          stroke: on ? '#ff9a5a' : 'rgba(120,140,200,0.35)',
+          font: 'bold 13px system-ui',
+        })) {
+          g.save.data.pacts[p.id] = rank === r ? 0 : r;
+          g.save.save();
+          g.audio.play('ui');
+        }
+      }
+    });
+    ui.text('Pacts apply to your next run. Higher heat, richer souls.',
+      this.W / 2, 508, { font: '12px system-ui', align: 'center', color: '#66759a' });
   }
 
   _tabPlay() {
@@ -92,6 +134,11 @@ export class Screens {
     if (ui.button(this.W / 2 - 20, 200, 340, 64, '▶  START RUN', { font: 'bold 24px system-ui', color: '#2f6f4f', hoverColor: '#3f9968' })) {
       g.audio.resume();
       g.startRun();
+    }
+    const heat = totalHeat(g.save.data.pacts);
+    if (heat > 0) {
+      ui.text(`🔥 Heat ${heat} — souls +${Math.round(heat * SOUL_BONUS_PER_HEAT * 100)}%`,
+        this.W / 2 + 150, 282, { font: 'bold 13px system-ui', align: 'center', color: '#ff9a5a' });
     }
     const st = g.save.data.stats;
     ui.panel(this.W / 2 - 20, 290, 340, 130);
