@@ -352,6 +352,57 @@ for (const [id, r] of Object.entries(bossResults)) {
 assert(bossCount >= 5, `5+ bosses defined and exercised (${bossCount})`);
 await page.screenshot({ path: `${OUT}/03-boss.png` });
 
+// --- Meta progression: skill tree, mastery, blacksmith, achievements, migration ---
+const metaPhase = await page.evaluate(async () => {
+  const g = window.__AROL__;
+  const { META_TREE, masteryLevel, ACHIEVEMENTS } = await import('./src/data/meta.js');
+  // v1 save migration: refund old flat upgrades.
+  localStorage.setItem('arol.save.v1', JSON.stringify({
+    souls: 10, metaLevels: { m_damage: 2 }, unlockedWeapons: ['sword'],
+    selectedWeapon: 'sword', stats: { runs: 3, wins: 1, kills: 50, bestDepth: 2 },
+  }));
+  const { SaveSystem } = await import('./src/systems/SaveSystem.js');
+  const migrated = new SaveSystem();
+  const migrationOk = migrated.data.version === 2 && migrated.data.souls === 10 + 25 + 40
+    && migrated.data.stats.kills === 50 && !migrated.data.metaLevels;
+
+  // Skill tree: buy the first Power node, verify it applies to a new run.
+  g.save.data.souls = 500;
+  g.save.buyNode('p1');
+  g.save.buyNode('f6'); // Fated keystone: start with a boon
+  g.startRun();
+  const treeApplied = g.player.stats.damageMult > 1.05;
+  const fatedApplied = g.ownedUpgrades.length >= 1;
+
+  // Mastery + blacksmith.
+  g.save.addWeaponKills('sword', 75); // → level 3
+  g.save.forgeWeapon('sword');
+  g.startRun();
+  const masteryOk = masteryLevel(g.save.weaponKills('sword')) === 3
+    && g.player.stats.attackSpeedMult > 1.04
+    && g.player.stats.baseDamage > 18;
+
+  // Achievements: commit a run and expect kill/win-based feats.
+  g.kills = 5;
+  g._runCommitted = false;
+  g._commitRun(true);
+  const feats = g.save.data.achievements;
+  return {
+    migrationOk, treeApplied, fatedApplied, masteryOk,
+    nodeCount: META_TREE.reduce((s, b) => s + b.nodes.length, 0),
+    achievementCount: ACHIEVEMENTS.length,
+    earned: feats.length,
+  };
+});
+console.log('  meta phase:', JSON.stringify(metaPhase));
+assert(metaPhase.migrationOk, 'v1 save migrates to v2 with soul refund');
+assert(metaPhase.treeApplied, 'skill-tree node applies at run start');
+assert(metaPhase.fatedApplied, 'Fated keystone grants a starting boon');
+assert(metaPhase.masteryOk, 'weapon mastery + blacksmith forge apply');
+assert(metaPhase.nodeCount >= 18, `18-node skill tree (${metaPhase.nodeCount})`);
+assert(metaPhase.achievementCount >= 14, `14+ achievements (${metaPhase.achievementCount})`);
+assert(metaPhase.earned >= 2, `achievements are granted (${metaPhase.earned})`);
+
 console.log('\nConsole errors:', errors.length);
 errors.slice(0, 20).forEach((e) => console.log('  !', e));
 assert(errors.length === 0, 'no console/page errors during full run');

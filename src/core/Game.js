@@ -15,7 +15,7 @@ import { generateDungeon } from '../dungeon/Generator.js';
 import { DIRS } from '../dungeon/Room.js';
 import { drawUpgrades, UPGRADES, RARITY } from '../data/upgrades.js';
 import { RELICS, relicById } from '../data/relics.js';
-import { META_UPGRADES } from '../data/meta.js';
+import { META_TREE, applyMastery, masteryLevel, SMITH_BONUS, ACHIEVEMENTS } from '../data/meta.js';
 import { WEAPONS, weaponById } from '../data/weapons.js';
 import { bossById } from '../data/bosses.js';
 import { biomeForFloor } from '../data/biomes.js';
@@ -147,10 +147,21 @@ export class Game {
     // Boon pool for this run = shared upgrades + the equipped weapon's pool.
     this.boonPool = [...UPGRADES, ...(weapon.upgrades || [])];
     this._applyMeta(this.player.stats);
+    // Weapon mastery + blacksmith forging (permanent, per-weapon).
+    applyMastery(this.player.stats, masteryLevel(this.save.weaponKills(weapon.id)));
+    this.player.stats.baseDamage *= 1 + SMITH_BONUS * this.save.smithLevel(weapon.id);
     this.player.refreshMaxHealth();
     this.player.health = this.player.maxHealth;
+    // Run trackers for achievements.
+    this._runMaxGold = 0;
+    this._runSynergies = 0;
+    this._newFeats = [];
 
     this._buildFloor();
+    if (this.save.hasNode('f6')) {
+      const commons = this.boonPool.filter((u) => u.rarity === 'common');
+      this._applyUpgrade(commons[this.rng.int(0, commons.length - 1)]);
+    }
     this._setState(GAME_STATE.PLAYING);
     this._exploreMood();
   }
@@ -160,9 +171,10 @@ export class Game {
   }
 
   _applyMeta(stats) {
-    for (const m of META_UPGRADES) {
-      const lvl = this.save.metaLevel(m.id);
-      if (lvl > 0) m.apply(stats, lvl);
+    for (const branch of META_TREE) {
+      for (const node of branch.nodes) {
+        if (this.save.hasNode(node.id)) node.apply(stats);
+      }
     }
   }
 
@@ -305,7 +317,8 @@ export class Game {
     this.choiceSource = this.upgradeQueue[0];
     const pool = this.choiceSource === 'relic' ? RELICS : this.boonPool;
     const bias = this.choiceSource === 'relic' && this.biome ? this.biome.lootBias : null;
-    this.upgradeChoices = drawUpgrades(this.rng, CONFIG.progression.upgradesOnLevel, this.ownedCounts, pool, bias);
+    const nChoices = CONFIG.progression.upgradesOnLevel + (this.save.hasNode('p6') ? 1 : 0);
+    this.upgradeChoices = drawUpgrades(this.rng, nChoices, this.ownedCounts, pool, bias);
     // Boss kills lead their relic choice with the boss-exclusive relic.
     if (this.choiceSource === 'relic' && this._pendingBossRelic) {
       const exclusive = relicById(this._pendingBossRelic);
@@ -339,6 +352,7 @@ export class Game {
     // Track synergy tags; announce any newly-unlocked synergies.
     if (u.tags) for (const t of u.tags) this.ownedTags[t] = (this.ownedTags[t] || 0) + 1;
     const fresh = this.synergy.recheck(this.ownedTags);
+    this._runSynergies = (this._runSynergies || 0) + fresh.length;
     for (const syn of fresh) {
       this.prompt = `SYNERGY UNLOCKED — ${syn.name}: ${syn.desc}`;
       this.audio.play('victory');
@@ -508,6 +522,7 @@ export class Game {
     }
     // Regular enemy.
     this.player.gold += Math.round((target.goldValue || 0) * greed);
+    this._runMaxGold = Math.max(this._runMaxGold || 0, this.player.gold);
     const levels = this.player.gainXp(Math.round((target.xpValue || 0) * xpBoost));
     if (levels > 0) this._queueUpgrades(levels, 'boon');
   }
@@ -533,7 +548,25 @@ export class Game {
     const souls = Math.round((this.soulsEarned + (won ? 40 : 0)) * greed);
     this._lastSouls = souls;
     this.save.addSouls(souls);
-    this.save.recordRun({ won, kills: this.kills, depth: this.floor });
+    this.save.recordRun({
+      won, kills: this.kills, depth: this.floor,
+      level: this.player.level, bossId: won && this.bossDef ? this.bossDef.id : null,
+    });
+    this.save.addWeaponKills(this.player.stats.weaponId, this.kills);
+    // Achievements: evaluate against updated save + this run's snapshot.
+    const run = {
+      synergies: this._runSynergies || 0,
+      relics: this.ownedUpgrades.filter((u) => u.relic).length,
+      maxGold: this._runMaxGold || 0,
+      level: this.player.level,
+    };
+    for (const a of ACHIEVEMENTS) {
+      if (!this.save.hasAchievement(a.id) && a.check(this.save.data, run)) {
+        this.save.grantAchievement(a.id);
+        this.save.addSouls(a.souls);
+        this._newFeats.push(a);
+      }
+    }
   }
 
   _descend() {

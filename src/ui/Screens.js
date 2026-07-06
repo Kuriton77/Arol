@@ -1,22 +1,33 @@
 // Full-screen overlay screens (menu, boon/shop selection, pause, game over,
 // victory). Uses the immediate-mode UI helper; reads/mutates Game via methods.
 import { GAME_STATE } from '../data/config.js';
-import { META_UPGRADES } from '../data/meta.js';
+import {
+  META_TREE, MASTERY_THRESHOLDS, MASTERY_PERKS, masteryLevel,
+  SMITH_MAX, SMITH_COSTS, ACHIEVEMENTS,
+} from '../data/meta.js';
 import { WEAPONS } from '../data/weapons.js';
 import { RARITY } from '../data/upgrades.js';
 import { roundRect } from './UI.js';
+
+const TABS = [
+  { id: 'play', label: 'PLAY' },
+  { id: 'sanctum', label: 'SANCTUM' },
+  { id: 'armory', label: 'ARMORY' },
+  { id: 'feats', label: 'FEATS' },
+];
 
 export class Screens {
   constructor(game) {
     this.game = game;
     this.ui = game.ui;
     this.ctx = game.ctx;
+    this.tab = 'play';
   }
 
   get W() { return this.ctx.canvas.width; }
   get H() { return this.ctx.canvas.height; }
 
-  // ------------------------------------------------------------------- menu
+  // ---------------------------------------------------------- menu (NPC hub)
   menu() {
     const c = this.ctx, ui = this.ui, g = this.game;
     // Backdrop gradient.
@@ -24,76 +35,175 @@ export class Screens {
     grad.addColorStop(0, '#0b0e18'); grad.addColorStop(1, '#141024');
     c.fillStyle = grad; c.fillRect(0, 0, this.W, this.H);
 
-    ui.text('A R O L', this.W / 2, 62, { font: 'bold 52px "Trebuchet MS", system-ui', align: 'center', color: '#eaf1ff', shadow: true });
-    ui.text('a rogue-lite dungeon crawler', this.W / 2, 92, { font: '16px "Trebuchet MS", system-ui', align: 'center', color: '#8fa4cc' });
-    ui.text(`✦ ${g.save.data.souls} souls`, this.W / 2, 118, { font: 'bold 18px system-ui', align: 'center', color: '#b48cff' });
+    ui.text('A R O L', this.W / 2, 52, { font: 'bold 44px "Trebuchet MS", system-ui', align: 'center', color: '#eaf1ff', shadow: true });
+    ui.text(`✦ ${g.save.data.souls} souls`, this.W / 2, 80, { font: 'bold 17px system-ui', align: 'center', color: '#b48cff' });
 
-    // Meta upgrades (left).
-    ui.panel(24, 140, 300, 350);
-    ui.text('PERMANENT UPGRADES', 40, 166, { font: 'bold 14px system-ui', color: '#9fb2dd' });
-    let y = 184;
-    for (const m of META_UPGRADES) {
-      const lvl = g.save.metaLevel(m.id);
-      const maxed = lvl >= m.maxLevel;
-      const cost = Math.round(m.baseCost * Math.pow(m.costGrowth, lvl));
-      ui.text(m.name, 40, y + 14, { font: 'bold 14px system-ui', color: '#e8ecf5' });
-      ui.text(m.desc(lvl + (maxed ? 0 : 1)), 40, y + 30, { font: '11px system-ui', color: '#8ea0c4' });
-      // Level pips.
-      for (let i = 0; i < m.maxLevel; i++) {
-        c.fillStyle = i < lvl ? '#b48cff' : 'rgba(120,130,170,0.3)';
-        c.fillRect(40 + i * 12, y + 38, 8, 6);
-      }
-      const label = maxed ? 'MAX' : `${cost}✦`;
-      const affordable = !maxed && g.save.data.souls >= cost;
-      if (ui.button(238, y + 6, 70, 36, label, {
-        color: maxed ? '#2a2a3a' : affordable ? '#3a2a66' : '#232436',
-        hoverColor: affordable ? '#553d99' : '#232436',
-        font: 'bold 13px system-ui',
-      }) && affordable) {
-        g.save.spendSouls(cost);
-        g.save.setMetaLevel(m.id, lvl + 1);
-      }
-      y += 62;
+    // Tab bar.
+    const tw = 130, tx0 = this.W / 2 - (TABS.length * tw) / 2;
+    TABS.forEach((t, i) => {
+      const active = this.tab === t.id;
+      if (ui.button(tx0 + i * tw + 4, 98, tw - 8, 34, t.label, {
+        color: active ? '#31427a' : '#1c2236',
+        hoverColor: active ? '#31427a' : '#28304e',
+        stroke: active ? '#8fb0ff' : 'rgba(120,140,200,0.35)',
+        font: 'bold 14px system-ui',
+      })) this.tab = t.id;
+    });
+
+    switch (this.tab) {
+      case 'play': this._tabPlay(); break;
+      case 'sanctum': this._tabSanctum(); break;
+      case 'armory': this._tabArmory(); break;
+      case 'feats': this._tabFeats(); break;
     }
+  }
 
-    // Weapons (right) — compact rows so all six fit.
-    ui.panel(this.W - 324, 140, 300, 350);
-    ui.text('WEAPON', this.W - 308, 166, { font: 'bold 14px system-ui', color: '#9fb2dd' });
-    y = 180;
+  _tabPlay() {
+    const c = this.ctx, ui = this.ui, g = this.game;
+    // Weapon quick-select (left).
+    ui.panel(24, 150, 300, 340);
+    ui.text('LOADOUT', 40, 176, { font: 'bold 14px system-ui', color: '#9fb2dd' });
+    let y = 190;
     for (const w of WEAPONS) {
       const unlocked = g.save.isWeaponUnlocked(w.id);
       const selected = g.save.data.selectedWeapon === w.id;
-      const x = this.W - 308;
+      const x = 40;
       if (selected) {
         c.fillStyle = 'rgba(99,184,255,0.12)';
-        roundRect(c, x - 8, y - 3, 284, 46, 8); c.fill();
-        c.strokeStyle = '#63b8ff'; c.lineWidth = 2; roundRect(c, x - 8, y - 3, 284, 46, 8); c.stroke();
+        roundRect(c, x - 8, y - 3, 284, 44, 8); c.fill();
+        c.strokeStyle = '#63b8ff'; c.lineWidth = 2; roundRect(c, x - 8, y - 3, 284, 44, 8); c.stroke();
       }
-      ui.text(w.name, x, y + 14, { font: 'bold 13px system-ui', color: unlocked ? '#e8ecf5' : '#7a86a2' });
-      ui.text(w.desc, x, y + 30, { font: '10px system-ui', color: '#8ea0c4' });
+      const mlvl = masteryLevel(g.save.weaponKills(w.id));
+      ui.text(`${w.name}${mlvl ? ' ★' + mlvl : ''}`, x, y + 13, { font: 'bold 13px system-ui', color: unlocked ? '#e8ecf5' : '#7a86a2' });
+      ui.text(w.desc, x, y + 29, { font: '10px system-ui', color: '#8ea0c4' });
       const label = unlocked ? (selected ? 'USING' : 'EQUIP') : `${w.cost}✦`;
       const affordable = unlocked || g.save.data.souls >= w.cost;
-      if (ui.button(x + 200, y + 5, 66, 30, label, {
+      if (ui.button(x + 202, y + 5, 64, 28, label, {
         color: selected ? '#24405f' : affordable ? '#2a3a66' : '#232436',
         font: 'bold 11px system-ui',
       })) {
         if (unlocked) g.save.selectWeapon(w.id);
         else if (affordable) { g.save.spendSouls(w.cost); g.save.unlockWeapon(w.id); g.save.selectWeapon(w.id); }
       }
-      y += 51;
+      y += 49;
     }
 
-    // Start + controls.
-    if (ui.button(this.W / 2 - 130, 400, 260, 56, '▶  START RUN', { font: 'bold 22px system-ui', color: '#2f6f4f', hoverColor: '#3f9968' })) {
+    // Start + stats (right).
+    if (ui.button(this.W / 2 - 20, 200, 340, 64, '▶  START RUN', { font: 'bold 24px system-ui', color: '#2f6f4f', hoverColor: '#3f9968' })) {
       g.audio.resume();
       g.startRun();
     }
     const st = g.save.data.stats;
-    ui.text(`Runs ${st.runs}  ·  Wins ${st.wins}  ·  Kills ${st.kills}  ·  Best Floor ${st.bestDepth}`,
-      this.W / 2, 474, { font: '12px system-ui', align: 'center', color: '#7787a8' });
+    ui.panel(this.W / 2 - 20, 290, 340, 130);
+    ui.text('CHRONICLE', this.W / 2, 316, { font: 'bold 13px system-ui', color: '#9fb2dd' });
+    const lines = [
+      `Runs ${st.runs}   ·   Wins ${st.wins}`,
+      `Kills ${st.kills}   ·   Best Floor ${st.bestDepth}`,
+      `Lifetime souls ${st.lifetimeSouls}   ·   Feats ${g.save.data.achievements.length}/${ACHIEVEMENTS.length}`,
+    ];
+    lines.forEach((ln, i) => ui.text(ln, this.W / 2 + 150, 344 + i * 24, { font: '13px system-ui', align: 'center', color: '#aab8d6' }));
+
     ui.text('WASD / Arrows move  ·  Mouse aim  ·  Click attack  ·  Space dash  ·  Esc pause  ·  M mute',
-      this.W / 2, 498, { font: '12px system-ui', align: 'center', color: '#66759a' });
-    ui.text('v1.0 MVP', this.W - 44, this.H - 12, { font: '11px system-ui', align: 'center', color: '#44506a' });
+      this.W / 2, this.H - 26, { font: '12px system-ui', align: 'center', color: '#66759a' });
+  }
+
+  // Skill tree: three branches, nodes unlock top-to-bottom.
+  _tabSanctum() {
+    const c = this.ctx, ui = this.ui, g = this.game;
+    const colW = 290, x0 = this.W / 2 - (colW * 3) / 2;
+    META_TREE.forEach((branch, bi) => {
+      const x = x0 + bi * colW + 20;
+      ui.text(branch.name, x + 125, 168, { font: 'bold 15px system-ui', align: 'center', color: branch.color });
+      branch.nodes.forEach((node, ni) => {
+        const y = 180 + ni * 58;
+        const owned = g.save.hasNode(node.id);
+        const prevOwned = ni === 0 || g.save.hasNode(branch.nodes[ni - 1].id);
+        const affordable = g.save.data.souls >= node.cost;
+        const canBuy = !owned && prevOwned && affordable;
+        // Connector line.
+        if (ni > 0) {
+          c.strokeStyle = owned || prevOwned ? branch.color : 'rgba(90,100,130,0.35)';
+          c.globalAlpha = owned ? 0.8 : 0.35;
+          c.lineWidth = 2;
+          c.beginPath(); c.moveTo(x + 125, y - 8); c.lineTo(x + 125, y + 2); c.stroke();
+          c.globalAlpha = 1;
+        }
+        const bg = owned ? '#233a2c' : canBuy ? '#2a3055' : '#191d2c';
+        if (ui.button(x, y, 250, 50, '', {
+          color: bg, hoverColor: canBuy ? '#3a4378' : bg,
+          stroke: owned ? branch.color : prevOwned ? 'rgba(140,160,220,0.5)' : 'rgba(80,90,115,0.35)',
+        }) && canBuy) {
+          g.save.spendSouls(node.cost);
+          g.save.buyNode(node.id);
+          g.audio.play('levelup');
+        }
+        const nameCol = owned ? branch.color : prevOwned ? '#e8ecf5' : '#5f6880';
+        ui.text(`${node.keystone ? '◆ ' : ''}${node.name}`, x + 14, y + 20, { font: 'bold 13px system-ui', color: nameCol });
+        ui.text(node.desc, x + 14, y + 37, { font: '11px system-ui', color: prevOwned ? '#8ea0c4' : '#565f78' });
+        ui.text(owned ? 'OWNED' : `${node.cost}✦`, x + 236, y + 25, {
+          font: 'bold 12px system-ui', align: 'right',
+          color: owned ? branch.color : affordable && prevOwned ? '#b48cff' : '#565f78',
+        });
+      });
+    });
+  }
+
+  // Armory: mastery progress + blacksmith forging per weapon.
+  _tabArmory() {
+    const c = this.ctx, ui = this.ui, g = this.game;
+    const x = this.W / 2 - 380, w = 760;
+    ui.panel(x, 148, w, 360);
+    ui.text('Mastery grows with kills. The blacksmith hones base damage permanently.',
+      this.W / 2, 172, { font: '12px system-ui', align: 'center', color: '#8ea0c4' });
+    let y = 188;
+    for (const wp of WEAPONS) {
+      const unlocked = g.save.isWeaponUnlocked(wp.id);
+      const kills = g.save.weaponKills(wp.id);
+      const mlvl = masteryLevel(kills);
+      const next = MASTERY_THRESHOLDS[mlvl];
+      const smith = g.save.smithLevel(wp.id);
+      ui.text(wp.name, x + 24, y + 16, { font: 'bold 14px system-ui', color: unlocked ? '#e8ecf5' : '#7a86a2' });
+      // Mastery stars + progress bar.
+      for (let i = 0; i < 5; i++) {
+        c.fillStyle = i < mlvl ? '#ffd23f' : 'rgba(120,130,170,0.3)';
+        c.font = '12px system-ui'; c.textAlign = 'left'; c.textBaseline = 'middle';
+        c.fillText('★', x + 24 + i * 14, y + 33);
+      }
+      const frac = next ? Math.min(1, kills / next) : 1;
+      ui.bar(x + 110, y + 27, 180, 10, frac, '#ffd23f', { stroke: 'rgba(255,255,255,0.15)' });
+      ui.text(next ? `${kills}/${next} kills — next: ${MASTERY_PERKS[mlvl]}` : `MASTERED (${kills} kills)`,
+        x + 300, y + 33, { font: '11px system-ui', color: '#8ea0c4' });
+      // Blacksmith.
+      const maxed = smith >= SMITH_MAX;
+      const cost = maxed ? 0 : SMITH_COSTS[smith];
+      const affordable = !maxed && unlocked && g.save.data.souls >= cost;
+      ui.text(`Forge +${Math.round(smith * 6)}%`, x + 556, y + 22, { font: 'bold 12px system-ui', color: smith > 0 ? '#ffb47a' : '#71809f' });
+      if (ui.button(x + 646, y + 6, 90, 32, maxed ? 'MAX' : `⚒ ${cost}✦`, {
+        color: maxed ? '#242434' : affordable ? '#5a3a20' : '#232436',
+        hoverColor: affordable ? '#7a5230' : '#232436',
+        font: 'bold 12px system-ui',
+      }) && affordable) {
+        g.save.spendSouls(cost);
+        g.save.forgeWeapon(wp.id);
+        g.audio.play('uiconfirm');
+      }
+      y += 52;
+    }
+  }
+
+  _tabFeats() {
+    const ui = this.ui, g = this.game;
+    const colW = 400, x0 = this.W / 2 - colW;
+    ui.panel(x0 - 20, 148, colW * 2 + 40, 372);
+    ACHIEVEMENTS.forEach((a, i) => {
+      const col = i % 2, row = Math.floor(i / 2);
+      const x = x0 + col * colW, y = 170 + row * 48;
+      const owned = g.save.hasAchievement(a.id);
+      ui.text(owned ? '✓' : '○', x, y + 12, { font: 'bold 16px system-ui', color: owned ? '#4fd88a' : '#565f78' });
+      ui.text(a.name, x + 26, y + 8, { font: 'bold 13px system-ui', color: owned ? '#e8ecf5' : '#8a94ac' });
+      ui.text(a.desc, x + 26, y + 25, { font: '11px system-ui', color: owned ? '#8ea0c4' : '#5f6880' });
+      ui.text(`+${a.souls}✦`, x + colW - 50, y + 15, { font: 'bold 12px system-ui', align: 'right', color: owned ? '#b48cff' : '#565f78' });
+    });
   }
 
   // -------------------------------------------------------- boon / shop screen
@@ -239,9 +349,19 @@ export class Screens {
     ui.text(`Floor ${g.floor}  ·  ${g.kills} kills  ·  ${g.roomsCleared} rooms cleared`,
       this.W / 2, this.H / 2 - 66, { font: '18px system-ui', align: 'center', color: '#d8dced' });
     ui.text(`✦ ${g._lastSouls || 0} souls banked`, this.W / 2, this.H / 2 - 36, { font: 'bold 18px system-ui', align: 'center', color: '#b48cff' });
+    this._featBanners();
     const bx = this.W / 2 - 120;
     if (ui.button(bx, this.H / 2 + 10, 240, 48, 'Try Again', { color: '#2f6f4f', hoverColor: '#3f9968' })) g.startRun();
     if (ui.button(bx, this.H / 2 + 70, 240, 48, 'Main Menu')) g._setState(GAME_STATE.MENU);
+  }
+
+  // Newly earned achievements, shown on both end screens.
+  _featBanners() {
+    const g = this.game;
+    if (!g._newFeats || !g._newFeats.length) return;
+    const names = g._newFeats.map((a) => `${a.name} (+${a.souls}✦)`).join('   ·   ');
+    this.ui.text(`🏆 FEAT UNLOCKED: ${names}`, this.W / 2, this.H - 40,
+      { font: 'bold 14px system-ui', align: 'center', color: '#ffd23f', shadow: true });
   }
 
   // ----------------------------------------------------------------- victory
@@ -253,6 +373,7 @@ export class Screens {
     ui.text(`${g.bossDef ? g.bossDef.name : 'The boss'} has fallen`, this.W / 2, this.H / 2 - 86, { font: '18px system-ui', align: 'center', color: '#ffe6a8' });
     ui.text(`Floor ${g.floor}  ·  ${g.kills} kills  ·  ✦ ${g._lastSouls || 0} souls banked`,
       this.W / 2, this.H / 2 - 54, { font: 'bold 16px system-ui', align: 'center', color: '#d8dced' });
+    this._featBanners();
     const bx = this.W / 2 - 130;
     if (ui.button(bx, this.H / 2, 260, 48, '▼  Descend Deeper', { color: '#5a3a7a', hoverColor: '#7a52a8' })) g._descend();
     if (ui.button(bx, this.H / 2 + 60, 260, 48, 'Return to Menu (bank souls)')) g._setState(GAME_STATE.MENU);
