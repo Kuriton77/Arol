@@ -111,6 +111,7 @@ export class Game {
       dt = Math.min(dt, 0.05); // clamp to avoid spiral-of-death on tab switch
       this.update(dt);
       this.render();
+      this.input.postUpdate();
       requestAnimationFrame(loop);
     };
     requestAnimationFrame(loop);
@@ -447,8 +448,6 @@ export class Game {
         this.camera.update(dt);
         break;
     }
-
-    this.input.postUpdate();
   }
 
   _updatePlaying(dt) {
