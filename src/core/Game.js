@@ -14,10 +14,12 @@ import { SpawnSystem } from '../systems/SpawnSystem.js';
 import { generateDungeon } from '../dungeon/Generator.js';
 import { DIRS } from '../dungeon/Room.js';
 import { drawUpgrades, UPGRADES, RARITY } from '../data/upgrades.js';
-import { RELICS } from '../data/relics.js';
+import { RELICS, relicById } from '../data/relics.js';
 import { META_UPGRADES } from '../data/meta.js';
 import { WEAPONS, weaponById } from '../data/weapons.js';
+import { bossForFloor } from '../data/bosses.js';
 import { SynergySystem } from '../systems/SynergySystem.js';
+import { Hazards } from '../fx/Hazards.js';
 import { Renderer } from '../render/Renderer.js';
 import { HUD } from '../ui/HUD.js';
 import { UI } from '../ui/UI.js';
@@ -37,6 +39,9 @@ export class Game {
     this.particles = new Particles();
     this.damageNumbers = new DamageNumbers();
     this.projectiles = createProjectilePool();
+    this.hazards = new Hazards();
+    this.bossIntroT = 0;       // cinematic letterbox timer
+    this.bossDef = null;       // this floor's boss definition
 
     this.renderer = new Renderer(this.ctx);
     this.hud = new HUD(this.ctx);
@@ -160,12 +165,14 @@ export class Game {
     this.rng = makeRng(seed);
     if (this.player) this.player.stats.secondWindUsed = false; // once per floor
     this.spawnSystem = new SpawnSystem(this.rng);
+    this.bossDef = bossForFloor(this.floor);
     this.dungeon = generateDungeon(this.rng, this.floor - 1);
     this.enemies = [];
     this.boss = null;
     this.projectiles.clear();
     this.particles.clear();
     this.damageNumbers.clear();
+    this.hazards.clear();
     this._enterRoom(this.dungeon.start, null, true);
   }
 
@@ -193,15 +200,19 @@ export class Game {
       this.player.y = room.bounds.h * 0.6;
     }
 
+    this.hazards.clear();
     if (room.needsClearing) {
-      const { enemies, boss } = this.spawnSystem.spawnRoom(room, this.floor - 1, this.player);
+      const { enemies, boss } = this.spawnSystem.spawnRoom(room, this.floor - 1, this.player, this.bossDef);
       this.enemies = enemies;
       this.boss = boss;
       room.locked = true;
       if (boss) {
-        this.audio.setMood('boss');
+        this.audio.setMood('boss', this.bossDef.musicScale);
         this.audio.play('bossroar');
         this.camera.addShake(10);
+        // Cinematic introduction: letterbox + name card; boss briefly invulnerable.
+        this.bossIntroT = 2.4;
+        boss.iframes = 2.6;
       } else {
         this.audio.setMood('combat');
       }
@@ -281,6 +292,14 @@ export class Game {
     this.choiceSource = this.upgradeQueue[0];
     const pool = this.choiceSource === 'relic' ? RELICS : this.boonPool;
     this.upgradeChoices = drawUpgrades(this.rng, CONFIG.progression.upgradesOnLevel, this.ownedCounts, pool);
+    // Boss kills lead their relic choice with the boss-exclusive relic.
+    if (this.choiceSource === 'relic' && this._pendingBossRelic) {
+      const exclusive = relicById(this._pendingBossRelic);
+      this._pendingBossRelic = null;
+      if (exclusive && !this.ownedCounts[exclusive.id]) {
+        this.upgradeChoices = [exclusive, ...this.upgradeChoices.slice(0, 2)];
+      }
+    }
     if (!this.upgradeChoices.length) { this.upgradeQueue.length = 0; this._setState(GAME_STATE.PLAYING); return; }
     this._setState(GAME_STATE.UPGRADE);
   }
@@ -416,6 +435,7 @@ export class Game {
       this.player.gold += Math.round(target.def.gold * greed);
       const lv = this.player.gainXp(Math.round(target.def.xp * xpBoost));
       this._queueUpgrades(lv, 'boon');
+      this._pendingBossRelic = target.def.rewardRelicId;
       this._queueUpgrades(1, 'relic'); // bosses always drop a relic
       // Victory handled by _checkRoomClear.
       return;
@@ -493,6 +513,14 @@ export class Game {
       return;
     }
 
+    // Boss cinematic intro: world frozen, letterbox drawn in render().
+    if (this.bossIntroT > 0) {
+      this.bossIntroT -= dt;
+      this.camera.update(dt);
+      if (this.bossIntroT > 1.6) this.camera.addShake(0.7); // rumble while the name card lands
+      return;
+    }
+
     // Room transition fade.
     if (this._transition) {
       this._transition.t += dt;
@@ -547,11 +575,12 @@ export class Game {
           this.particles.burst(e.x, e.y, e.accent, 8, { speed: 140, life: 0.4 });
         }
       },
-      spawnAdd: (boss) => {
+      spawnAdd: (boss, type = 'melee') => {
         if (this.enemies.length < 40) {
-          this.enemies.push(this.spawnSystem.spawnAdd(boss, bounds, p));
+          this.enemies.push(this.spawnSystem.spawnAdd(boss, bounds, p, type));
         }
       },
+      spawnHazard: (o) => this.hazards.spawn(o),
       explode: (x, y, r, dmg, color) => this.combat.explode(x, y, r, dmg, color),
       onShoot: () => this.audio.play('shoot'),
       onTelegraph: () => this.audio.play('telegraph'),
@@ -572,8 +601,17 @@ export class Game {
       }
     }
 
-    // --- projectiles + combat ---
+    // --- projectiles + hazards + combat ---
     updateProjectiles(this.projectiles, dt, bounds);
+    this.hazards.update(dt, {
+      player: p,
+      damagePlayer: (dmg, x, y, kb) => this.combat._damagePlayer(dmg, x, y, kb),
+      onDetonate: (h) => {
+        this.particles.burst(h.x, h.y, h.color, 12, { speed: 220, life: 0.4 });
+        this.camera.addShake(3);
+        this.audio.play('boom');
+      },
+    });
     this.combat.update(dt);
 
     // --- separation so enemies don't stack perfectly ---
@@ -639,6 +677,30 @@ export class Game {
       c.setTransform(1, 0, 0, 1, 0, 0);
       c.fillStyle = `rgba(4,5,10,${this.fade})`;
       c.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    }
+
+    // Boss cinematic letterbox + name card.
+    if (this.bossIntroT > 0 && this.boss && this.state === GAME_STATE.PLAYING) {
+      c.setTransform(1, 0, 0, 1, 0, 0);
+      const W = this.canvas.width, H = this.canvas.height;
+      const inT = Math.min(1, (2.4 - this.bossIntroT) / 0.35);       // slide in
+      const outT = Math.min(1, this.bossIntroT / 0.3);               // slide out
+      const bar = 64 * Math.min(inT, outT);
+      c.fillStyle = '#000';
+      c.fillRect(0, 0, W, bar);
+      c.fillRect(0, H - bar, W, bar);
+      if (this.bossIntroT < 2.0 && this.bossIntroT > 0.3) {
+        const a = Math.min(1, (2.0 - this.bossIntroT) / 0.3);
+        c.globalAlpha = a;
+        c.textAlign = 'center';
+        c.fillStyle = this.boss.accent;
+        c.font = 'bold 38px "Trebuchet MS", system-ui';
+        c.fillText(this.boss.def.name, W / 2, H / 2 - 90);
+        c.fillStyle = 'rgba(230,235,250,0.85)';
+        c.font = 'italic 17px "Trebuchet MS", system-ui';
+        c.fillText(this.boss.def.title, W / 2, H / 2 - 60);
+        c.globalAlpha = 1;
+      }
     }
 
     // State overlays / screens.

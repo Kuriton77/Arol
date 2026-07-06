@@ -11,14 +11,14 @@ export class SpawnSystem {
   constructor(rng) { this.rng = rng; }
 
   // Returns { enemies, boss } for the given room.
-  spawnRoom(room, depthLevel, player) {
+  spawnRoom(room, depthLevel, player, bossDef = null) {
     const enemies = [];
     let boss = null;
     const b = room.bounds;
 
     for (const group of room.enemyPlan) {
       if (group.type === 'boss') {
-        boss = new Boss(b.w / 2, b.h * 0.32, depthLevel);
+        boss = new Boss(b.w / 2, b.h * 0.32, bossDef, depthLevel);
         continue;
       }
       const def = ENEMY_TYPES[group.type];
@@ -44,8 +44,8 @@ export class SpawnSystem {
     return e;
   }
 
-  spawnAdd(boss, bounds, player) {
-    const def = ENEMY_TYPES.melee;
+  spawnAdd(boss, bounds, player, type = 'melee') {
+    const def = ENEMY_TYPES[type] || ENEMY_TYPES.melee;
     const pos = this._safePos(bounds, player);
     const e = new Enemy(pos.x, pos.y, def, 2);
     e.spawnedByBoss = true;

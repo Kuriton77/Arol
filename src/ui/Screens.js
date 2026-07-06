@@ -213,7 +213,7 @@ export class Screens {
     ui.dim(0.7);
     c.fillStyle = 'rgba(120,90,20,0.14)'; c.fillRect(0, 0, this.W, this.H);
     ui.text('VICTORY', this.W / 2, this.H / 2 - 130, { font: 'bold 52px system-ui', align: 'center', color: '#ffd23f', shadow: true });
-    ui.text('The Hollow King has fallen', this.W / 2, this.H / 2 - 86, { font: '18px system-ui', align: 'center', color: '#ffe6a8' });
+    ui.text(`${g.bossDef ? g.bossDef.name : 'The boss'} has fallen`, this.W / 2, this.H / 2 - 86, { font: '18px system-ui', align: 'center', color: '#ffe6a8' });
     ui.text(`Floor ${g.floor}  ·  ${g.kills} kills  ·  ✦ ${g._lastSouls || 0} souls banked`,
       this.W / 2, this.H / 2 - 54, { font: 'bold 16px system-ui', align: 'center', color: '#d8dced' });
     const bx = this.W / 2 - 130;

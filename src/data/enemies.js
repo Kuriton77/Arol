@@ -109,20 +109,4 @@ export const ENEMY_TYPES = {
   },
 };
 
-// Boss definition, referenced by Boss.js. Phases keyed by remaining-HP fraction.
-export const BOSS_DEF = {
-  name: 'The Hollow King',
-  radius: 46,
-  health: 900,
-  speed: 82,
-  color: '#d64f7a',
-  accent: '#ffb0cf',
-  xp: 200,
-  gold: 120,
-  contactDamage: 16,
-  phases: [
-    { at: 1.0, name: 'Awakening', speedMult: 1.0, cooldownMult: 1.0 },
-    { at: 0.66, name: 'Fury',      speedMult: 1.2, cooldownMult: 0.78 },
-    { at: 0.33, name: 'Desperation', speedMult: 1.45, cooldownMult: 0.6 },
-  ],
-};
+// Boss definitions live in bosses.js (data-driven pattern engine).

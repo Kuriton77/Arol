@@ -17,6 +17,7 @@ export class Renderer {
 
     this._room(game);
     this._reward(game);
+    game.hazards.render(c);
     // Draw player projectiles & fx below actors, hostile above for readability.
     game.particles.render(c);
     this._projectiles(game);
@@ -35,8 +36,10 @@ export class Renderer {
     const b = { x: 0, y: 0, w: CONFIG.world.width, h: CONFIG.world.height };
     const pad = CONFIG.world.roomPadding;
 
-    // Floor.
-    const tint = this._roomTint(room ? room.type : ROOM.COMBAT);
+    // Floor. Boss rooms take their arena theme from the boss definition.
+    const tint = (room && room.type === ROOM.BOSS && game.bossDef && game.bossDef.arena)
+      ? game.bossDef.arena
+      : this._roomTint(room ? room.type : ROOM.COMBAT);
     c.fillStyle = tint.floor;
     c.fillRect(0, 0, b.w, b.h);
 
@@ -312,29 +315,40 @@ export class Renderer {
 
   _boss(c, boss) {
     c.save();
+    const kind = boss.telegraphKind;
     // Charge telegraph line.
-    if (boss.state === 'telegraph' && boss.pattern === 'charge') {
+    if (kind === 'line') {
       c.save();
       c.globalAlpha = 0.25 + boss.telegraph * 0.4;
-      c.strokeStyle = '#ff5a8a'; c.lineWidth = 10;
+      c.strokeStyle = boss.accent; c.lineWidth = boss.radius * 0.5;
       c.beginPath(); c.moveTo(boss.x, boss.y);
       c.lineTo(boss.x + Math.cos(boss.facing) * 700, boss.y + Math.sin(boss.facing) * 700);
       c.stroke();
       c.restore();
     }
-    // Radial/spiral warning ring.
-    if (boss.state === 'telegraph' && (boss.pattern === 'radial' || boss.pattern === 'spiral')) {
+    // Projectile-pattern warning ring.
+    if (kind === 'ring') {
       c.save();
       c.globalAlpha = 0.3 + boss.telegraph * 0.4;
-      c.strokeStyle = '#ffb0cf'; c.lineWidth = 4;
+      c.strokeStyle = boss.accent; c.lineWidth = 4;
       c.beginPath(); c.arc(boss.x, boss.y, boss.radius + 20 + boss.telegraph * 40, 0, TAU); c.stroke();
+      c.restore();
+    }
+    // Slam/teleport burst warning: pulsing filled disc.
+    if (kind === 'burst') {
+      c.save();
+      c.globalAlpha = (0.12 + boss.telegraph * 0.22) * (0.7 + Math.sin(performance.now() / 70) * 0.3);
+      c.fillStyle = boss.accent;
+      const r = (boss.def.params.slamRadius ?? 130);
+      c.beginPath(); c.arc(boss.x, boss.y, r, 0, TAU); c.fill();
       c.restore();
     }
 
     c.translate(boss.x, boss.y);
     const flash = boss.hurtFlash > 0;
-    const phaseTint = ['#d64f7a', '#e0446a', '#ff3a5e'][boss.phaseIndex] || boss.color;
-    c.shadowColor = phaseTint; c.shadowBlur = 24;
+    // Later phases push the body colour hotter and the glow stronger.
+    const phaseTint = boss.phaseIndex >= 2 ? boss.accent : boss.color;
+    c.shadowColor = phaseTint; c.shadowBlur = 24 + boss.phaseIndex * 10;
     c.fillStyle = flash ? '#fff' : phaseTint;
     c.strokeStyle = boss.accent; c.lineWidth = 3;
     c.beginPath(); c.arc(0, 0, boss.radius, 0, TAU); c.fill(); c.stroke();

@@ -43,7 +43,8 @@ export class AudioManager {
   }
   toggleMute() { this.setMuted(!this._muted); return this._muted; }
 
-  setMood(mood) { this._mood = mood; }
+  // Optional scale override lets each boss carry its own soundtrack.
+  setMood(mood, scale = null) { this._mood = mood; this._bossScale = mood === 'boss' ? scale : null; }
 
   // --- low level tone helper ---
   _tone(freq, dur, type = 'square', vol = 0.3, dest = null, slide = 0) {
@@ -121,7 +122,7 @@ export class AudioManager {
       combat:  [196, 246, 293, 392, 246, 311],
       boss:    [146, 174, 207, 261, 174, 155],
     };
-    const scale = scales[this._mood] || scales.explore;
+    const scale = (this._mood === 'boss' && this._bossScale) || scales[this._mood] || scales.explore;
     const note = scale[this._step % scale.length];
     this._step++;
 

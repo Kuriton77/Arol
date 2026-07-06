@@ -227,33 +227,54 @@ assert(['playing', 'gameover', 'upgrade'].includes(enemyPhase.state), 'sim staye
 // Reset to sword for boss test.
 await page.evaluate(() => { const g = window.__AROL__; g.save.data.selectedWeapon = 'sword'; g.startRun(); });
 
-// --- Force a boss room to validate boss systems ---
-await page.evaluate(() => {
+// --- All six bosses: instantiate, run patterns, emit attacks, no errors ---
+const bossResults = await page.evaluate(async () => {
   const g = window.__AROL__;
-  const boss = g.dungeon.boss;
-  g._enterRoom(boss, null, false);
-});
-await page.waitForTimeout(50);
-let bossInfo = await page.evaluate(() => {
-  const g = window.__AROL__;
-  return { hasBoss: !!g.boss, bhp: g.boss ? g.boss.health : 0, phases: g.boss ? g.boss.def.phases.length : 0 };
-});
-assert(bossInfo.hasBoss, 'boss spawns in boss room');
-assert(bossInfo.phases >= 3, `boss has 3+ phases (${bossInfo.phases})`);
-
-// Step boss fight to ensure it emits projectiles / changes state without error.
-await page.evaluate(() => {
-  const g = window.__AROL__;
-  for (let i = 0; i < 60 * 8; i++) {
-    g.input.keys.clear();
-    g.input.mouse.x = g.boss ? g.boss.x : 480; g.input.mouse.y = g.boss ? g.boss.y : 270;
-    g.input.mouse.down = true;
-    g.update(1 / 60);
+  const { BOSSES } = await import('./src/data/bosses.js');
+  const results = {};
+  for (let floor = 1; floor <= BOSSES.length; floor++) {
+    g.startRun();
+    g.floor = floor;
+    g._buildFloor();
+    g.bossIntroT = 0; // skip cinematic for the test
+    g._enterRoom(g.dungeon.boss, null, false);
+    g.bossIntroT = 0;
+    if (g.boss) g.boss.iframes = 0;
+    const id = g.bossDef.id;
+    const patterns = new Set();
+    let projSeen = 0, hazardsSeen = 0, addsSeen = 0;
+    for (let f = 0; f < 60 * 10; f++) {
+      g.input.keys.clear();
+      if (g.boss) { g.input.mouse.x = g.boss.x; g.input.mouse.y = g.boss.y; }
+      g.input.mouse.down = true;
+      // Move to dodge a little so charge patterns end.
+      if (f % 40 < 20) g.input.keys.add('d'); else g.input.keys.add('a');
+      g.update(1 / 60);
+      if (g.boss) {
+        if (g.boss.pattern) patterns.add(g.boss.pattern);
+        projSeen = Math.max(projSeen, g.projectiles.count);
+        hazardsSeen = Math.max(hazardsSeen, g.hazards.count);
+        addsSeen = Math.max(addsSeen, g.enemies.length);
+      }
+      if (g.state === 'upgrade') { if (g.shopMode) g._closeShop(); else g._pickUpgrade(g.upgradeChoices[0]); }
+      if (g.state !== 'playing') break;
+    }
+    results[id] = {
+      phases: g.bossDef.phases.length,
+      patterns: [...patterns],
+      attacked: projSeen > 0 || hazardsSeen > 0 || addsSeen > 0,
+      state: g.state,
+    };
   }
-  window.__BOSS_SNAP__ = { proj: g.projectiles.count, bhp: g.boss ? g.boss.health : -1, state: g.state };
+  return results;
 });
-const bsnap = await page.evaluate(() => window.__BOSS_SNAP__);
-console.log('  boss snapshot:', JSON.stringify(bsnap));
+let bossCount = 0;
+for (const [id, r] of Object.entries(bossResults)) {
+  bossCount++;
+  assert(r.phases >= 3, `boss '${id}' has 3+ phases`);
+  assert(r.patterns.length >= 1 && r.attacked, `boss '${id}' ran patterns [${r.patterns.join(',')}]`);
+}
+assert(bossCount >= 5, `5+ bosses defined and exercised (${bossCount})`);
 await page.screenshot({ path: `${OUT}/03-boss.png` });
 
 console.log('\nConsole errors:', errors.length);

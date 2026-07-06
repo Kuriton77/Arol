@@ -81,3 +81,18 @@ export const RELICS = [
   r('growth_ring', 'Growth Ring', 'rare', [], '+25% experience gained', (s) => { s.xpMult += 0.25; }),
   r('war_drum', 'War Drum', 'epic', [], '+10% damage, +10% attack speed', (s) => { s.damageMult += 0.1; s.attackSpeedMult += 0.1; }),
 ];
+
+// Boss-exclusive relics — never in the random pool; offered as the first
+// choice after defeating the matching boss (bosses.js rewardRelicId).
+export const BOSS_RELICS = [
+  r('hollow_crown', 'Hollow Crown', 'legendary', ['void'], '+1 blade projectile, +10% damage', (s) => { s.projectiles += 1; s.damageMult += 0.1; }),
+  r('bone_scepter', 'Bone Scepter', 'legendary', ['blood'], '+15% damage, heal 2 on every kill', (s) => { s.damageMult += 0.15; s.healOnKill += 2; }),
+  r('web_talisman', 'Web Talisman', 'legendary', ['ice', 'poison'], 'Hits Chill, +10% attack speed', (s) => { s.chill += 1; s.attackSpeedMult += 0.1; }),
+  r('wyrm_scale', 'Wyrm Scale', 'legendary', ['ice', 'earth'], 'Take 12% less damage, hits Chill', (s) => { s.armor += 0.12; s.chill += 1; }),
+  r('magma_heart', 'Magma Heart', 'legendary', ['fire'], '+2 Burn, +20 max health', (s) => { s.burn += 2; s.maxHealthBonus += 20; }),
+  r('void_prism', 'Void Prism', 'legendary', ['void', 'wind'], 'Execute below 10%, 8% dodge', (s) => { s.cull += 0.1; s.dodge += 0.08; }),
+];
+
+export function relicById(id) {
+  return RELICS.find((x) => x.id === id) || BOSS_RELICS.find((x) => x.id === id) || null;
+}
