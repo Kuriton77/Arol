@@ -1,0 +1,306 @@
+// Draws the world: room, doors, entities, telegraphs, projectiles and FX.
+// Pure rendering — reads game state, mutates nothing. Camera shake/transition
+// offset is applied around the whole world draw.
+import { CONFIG, ROOM } from '../data/config.js';
+import { derive } from '../systems/Stats.js';
+import { TAU } from '../core/math.js';
+import { DIRS } from '../dungeon/Room.js';
+
+export class Renderer {
+  constructor(ctx) { this.ctx = ctx; }
+
+  draw(game) {
+    const c = this.ctx;
+    const shake = game.camera.shakeOffset();
+    c.save();
+    c.translate(Math.round(shake.x - game.camera.x), Math.round(shake.y - game.camera.y));
+
+    this._room(game);
+    this._reward(game);
+    // Draw player projectiles & fx below actors, hostile above for readability.
+    game.particles.render(c);
+    this._projectiles(game);
+    for (const e of game.enemies) if (e.alive) this._enemy(c, e);
+    if (game.boss && game.boss.alive) this._boss(c, game.boss);
+    if (game.player && game.player.alive) this._player(c, game.player);
+    // Death particles / lingering fx already in particles.
+    game.damageNumbers.render(c);
+
+    c.restore();
+  }
+
+  _room(game) {
+    const c = this.ctx;
+    const room = game.currentRoom;
+    const b = { x: 0, y: 0, w: CONFIG.world.width, h: CONFIG.world.height };
+    const pad = CONFIG.world.roomPadding;
+
+    // Floor.
+    const tint = this._roomTint(room ? room.type : ROOM.COMBAT);
+    c.fillStyle = tint.floor;
+    c.fillRect(0, 0, b.w, b.h);
+
+    // Subtle floor grid.
+    c.strokeStyle = tint.grid;
+    c.lineWidth = 1;
+    c.beginPath();
+    for (let x = pad; x <= b.w - pad; x += 48) { c.moveTo(x, pad); c.lineTo(x, b.h - pad); }
+    for (let y = pad; y <= b.h - pad; y += 48) { c.moveTo(pad, y); c.lineTo(b.w - pad, y); }
+    c.stroke();
+
+    // Walls.
+    c.fillStyle = tint.wall;
+    c.fillRect(0, 0, b.w, pad);
+    c.fillRect(0, b.h - pad, b.w, pad);
+    c.fillRect(0, 0, pad, b.h);
+    c.fillRect(b.w - pad, 0, pad, b.h);
+
+    // Doors.
+    if (room) {
+      for (const dir of Object.keys(room.doors)) {
+        this._door(c, room, dir, room.locked);
+      }
+    }
+  }
+
+  _door(c, room, dir, locked) {
+    const pad = CONFIG.world.roomPadding;
+    const b = room.bounds;
+    const dw = 74; // door opening size
+    const open = !locked;
+    const col = open ? '#4fd88a' : '#c94b4b';
+    c.fillStyle = open ? '#0d1420' : '#2a1416';
+    c.strokeStyle = col;
+    c.lineWidth = 3;
+    let x, y, w, h;
+    if (dir === 'n') { x = b.w / 2 - dw / 2; y = 0; w = dw; h = pad; }
+    else if (dir === 's') { x = b.w / 2 - dw / 2; y = b.h - pad; w = dw; h = pad; }
+    else if (dir === 'w') { x = 0; y = b.h / 2 - dw / 2; w = pad; h = dw; }
+    else { x = b.w - pad; y = b.h / 2 - dw / 2; w = pad; h = dw; }
+    c.fillRect(x, y, w, h);
+    c.strokeRect(x + 1, y + 1, w - 2, h - 2);
+    if (locked) {
+      // Bars.
+      c.strokeStyle = 'rgba(220,90,90,0.8)';
+      c.lineWidth = 4;
+      c.beginPath();
+      if (dir === 'n' || dir === 's') {
+        for (let i = 1; i < 4; i++) { c.moveTo(x + (w * i) / 4, y); c.lineTo(x + (w * i) / 4, y + h); }
+      } else {
+        for (let i = 1; i < 4; i++) { c.moveTo(x, y + (h * i) / 4); c.lineTo(x + w, y + (h * i) / 4); }
+      }
+      c.stroke();
+    }
+  }
+
+  _roomTint(type) {
+    switch (type) {
+      case ROOM.BOSS:     return { floor: '#241018', wall: '#3a1826', grid: 'rgba(200,80,120,0.08)' };
+      case ROOM.ELITE:    return { floor: '#1c1526', wall: '#2c2140', grid: 'rgba(150,110,220,0.09)' };
+      case ROOM.TREASURE: return { floor: '#1e1c12', wall: '#33301c', grid: 'rgba(220,190,90,0.09)' };
+      case ROOM.SHOP:     return { floor: '#12201c', wall: '#1d3330', grid: 'rgba(90,210,180,0.09)' };
+      case ROOM.EVENT:    return { floor: '#141a24', wall: '#22304a', grid: 'rgba(120,160,230,0.09)' };
+      case ROOM.START:    return { floor: '#12161f', wall: '#1e2634', grid: 'rgba(120,150,210,0.07)' };
+      default:            return { floor: '#12141c', wall: '#20242f', grid: 'rgba(120,140,200,0.06)' };
+    }
+  }
+
+  _reward(game) {
+    const room = game.currentRoom;
+    if (!room || !room.reward || room.rewardTaken) return;
+    const c = this.ctx;
+    const cx = room.bounds.w / 2, cy = room.bounds.h / 2;
+    c.save();
+    const pulse = 1 + Math.sin(game.time * 4) * 0.06;
+    c.translate(cx, cy);
+    c.scale(pulse, pulse);
+    if (room.reward.kind === 'upgrade') {
+      c.fillStyle = '#c9a227'; c.strokeStyle = '#ffe08a'; c.lineWidth = 3;
+      c.fillRect(-22, -16, 44, 32); c.strokeRect(-22, -16, 44, 32);
+      c.fillStyle = '#ffe08a'; c.fillRect(-22, -4, 44, 6);
+      this._label(c, 'TREASURE', 0, -30);
+    } else if (room.reward.kind === 'shop') {
+      c.fillStyle = '#2fae87'; c.strokeStyle = '#7effcf'; c.lineWidth = 3;
+      c.beginPath(); c.arc(0, 0, 22, 0, TAU); c.fill(); c.stroke();
+      c.fillStyle = '#04211a'; c.font = 'bold 22px system-ui'; c.textAlign = 'center'; c.textBaseline = 'middle';
+      c.fillText('$', 0, 1);
+      this._label(c, 'SHOP', 0, -34);
+    } else if (room.reward.kind === 'event') {
+      c.fillStyle = '#3f6fd8'; c.strokeStyle = '#a8c6ff'; c.lineWidth = 3;
+      c.beginPath(); c.arc(0, 0, 22, 0, TAU); c.fill(); c.stroke();
+      c.fillStyle = '#eaf1ff'; c.font = 'bold 26px system-ui'; c.textAlign = 'center'; c.textBaseline = 'middle';
+      c.fillText('?', 0, 1);
+      this._label(c, 'EVENT', 0, -34);
+    }
+    c.restore();
+  }
+
+  _label(c, text, x, y) {
+    c.fillStyle = 'rgba(255,255,255,0.85)';
+    c.font = 'bold 11px system-ui'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillText(text, x, y);
+  }
+
+  _healthBar(c, e) {
+    if (e.health >= e.maxHealth) return;
+    const w = e.radius * 2.2, h = 4;
+    const x = e.x - w / 2, y = e.y - e.radius - 10;
+    c.fillStyle = 'rgba(0,0,0,0.6)'; c.fillRect(x, y, w, h);
+    c.fillStyle = e.isElite ? '#ff9d4a' : '#5adc7a';
+    c.fillRect(x, y, w * (e.health / e.maxHealth), h);
+  }
+
+  _flash(c, e) {
+    return e.hurtFlash > 0;
+  }
+
+  _enemy(c, e) {
+    c.save();
+    c.translate(e.x, e.y);
+    const flash = e.hurtFlash > 0;
+    const body = flash ? '#ffffff' : e.color;
+
+    // Telegraph ring during windup.
+    if (e.telegraph > 0) {
+      c.save();
+      c.globalAlpha = 0.35 + e.telegraph * 0.35;
+      c.strokeStyle = '#ffdf6b';
+      c.lineWidth = 3;
+      const r = e.radius + 6 + e.telegraph * 10;
+      c.beginPath(); c.arc(0, 0, r, 0, TAU); c.stroke();
+      c.restore();
+    }
+
+    if (e.isElite) {
+      c.shadowColor = e.accent; c.shadowBlur = 14;
+    }
+
+    c.fillStyle = body;
+    c.strokeStyle = flash ? '#fff' : e.accent;
+    c.lineWidth = 2;
+    if (e.ai === 'ranged') {
+      // Diamond.
+      const r = e.radius;
+      c.beginPath();
+      c.moveTo(0, -r); c.lineTo(r, 0); c.lineTo(0, r); c.lineTo(-r, 0); c.closePath();
+      c.fill(); c.stroke();
+    } else if (e.ai === 'tank') {
+      // Chunky rounded square.
+      const r = e.radius;
+      c.fillRect(-r, -r, r * 2, r * 2);
+      c.strokeRect(-r, -r, r * 2, r * 2);
+    } else {
+      c.beginPath(); c.arc(0, 0, e.radius, 0, TAU); c.fill(); c.stroke();
+    }
+    // Facing pip.
+    c.shadowBlur = 0;
+    c.fillStyle = 'rgba(255,255,255,0.85)';
+    c.beginPath();
+    c.arc(Math.cos(e.facing) * e.radius * 0.55, Math.sin(e.facing) * e.radius * 0.55, 3, 0, TAU);
+    c.fill();
+    c.restore();
+
+    this._healthBar(c, e);
+  }
+
+  _boss(c, boss) {
+    c.save();
+    // Charge telegraph line.
+    if (boss.state === 'telegraph' && boss.pattern === 'charge') {
+      c.save();
+      c.globalAlpha = 0.25 + boss.telegraph * 0.4;
+      c.strokeStyle = '#ff5a8a'; c.lineWidth = 10;
+      c.beginPath(); c.moveTo(boss.x, boss.y);
+      c.lineTo(boss.x + Math.cos(boss.facing) * 700, boss.y + Math.sin(boss.facing) * 700);
+      c.stroke();
+      c.restore();
+    }
+    // Radial/spiral warning ring.
+    if (boss.state === 'telegraph' && (boss.pattern === 'radial' || boss.pattern === 'spiral')) {
+      c.save();
+      c.globalAlpha = 0.3 + boss.telegraph * 0.4;
+      c.strokeStyle = '#ffb0cf'; c.lineWidth = 4;
+      c.beginPath(); c.arc(boss.x, boss.y, boss.radius + 20 + boss.telegraph * 40, 0, TAU); c.stroke();
+      c.restore();
+    }
+
+    c.translate(boss.x, boss.y);
+    const flash = boss.hurtFlash > 0;
+    const phaseTint = ['#d64f7a', '#e0446a', '#ff3a5e'][boss.phaseIndex] || boss.color;
+    c.shadowColor = phaseTint; c.shadowBlur = 24;
+    c.fillStyle = flash ? '#fff' : phaseTint;
+    c.strokeStyle = boss.accent; c.lineWidth = 3;
+    c.beginPath(); c.arc(0, 0, boss.radius, 0, TAU); c.fill(); c.stroke();
+    // Crown-ish inner mark.
+    c.shadowBlur = 0;
+    c.fillStyle = 'rgba(255,255,255,0.9)';
+    c.beginPath(); c.arc(0, 0, boss.radius * 0.5, 0, TAU); c.fill();
+    c.fillStyle = phaseTint;
+    c.beginPath(); c.arc(0, 0, boss.radius * 0.3, 0, TAU); c.fill();
+    // Facing pip.
+    c.fillStyle = 'rgba(255,255,255,0.8)';
+    c.beginPath(); c.arc(Math.cos(boss.facing) * boss.radius * 0.7, Math.sin(boss.facing) * boss.radius * 0.7, 5, 0, TAU); c.fill();
+    c.restore();
+  }
+
+  _player(c, p) {
+    c.save();
+    // Dash trail.
+    if (p.isDashing) {
+      c.globalAlpha = 0.3;
+      c.fillStyle = '#7ecbff';
+      for (let i = 1; i <= 3; i++) {
+        c.beginPath();
+        c.arc(p.x - p.vx * 0.01 * i, p.y - p.vy * 0.01 * i, p.radius * (1 - i * 0.15), 0, TAU);
+        c.fill();
+      }
+      c.globalAlpha = 1;
+    }
+
+    // Swing arc.
+    if (p.attackPhase === 'active' || p.attackPhase === 'windup') {
+      const range = derive.range(p.stats);
+      const half = derive.arc(p.stats) / 2;
+      const prog = p.attackPhase === 'active' ? p.swingProgress : 0;
+      c.save();
+      c.translate(p.x, p.y);
+      c.globalAlpha = p.attackPhase === 'active' ? 0.5 : 0.18;
+      c.fillStyle = '#dff0ff';
+      const a0 = p.swingDir - half;
+      const a1 = p.swingDir - half + (half * 2) * (p.attackPhase === 'active' ? prog : 1);
+      c.beginPath();
+      c.moveTo(0, 0);
+      c.arc(0, 0, range, a0, a1);
+      c.closePath();
+      c.fill();
+      c.restore();
+    }
+
+    // Body.
+    c.translate(p.x, p.y);
+    const blink = p.iframes > 0 && Math.floor(p.iframes * 20) % 2 === 0;
+    c.globalAlpha = blink ? 0.4 : 1;
+    c.shadowColor = '#63b8ff'; c.shadowBlur = 12;
+    c.fillStyle = p.hurtFlash > 0 ? '#fff' : '#63b8ff';
+    c.strokeStyle = '#d6ecff'; c.lineWidth = 2;
+    c.beginPath(); c.arc(0, 0, p.radius, 0, TAU); c.fill(); c.stroke();
+    c.shadowBlur = 0;
+    // Facing indicator (weapon nub).
+    c.fillStyle = '#eaf4ff';
+    c.beginPath();
+    c.arc(Math.cos(p.facing) * p.radius * 0.9, Math.sin(p.facing) * p.radius * 0.9, 4, 0, TAU);
+    c.fill();
+    c.restore();
+  }
+
+  _projectiles(game) {
+    const c = this.ctx;
+    game.projectiles.forEach((p) => {
+      c.save();
+      c.shadowColor = p.color; c.shadowBlur = 10;
+      c.fillStyle = p.color;
+      c.beginPath(); c.arc(p.x, p.y, p.radius, 0, TAU); c.fill();
+      c.restore();
+    });
+  }
+}

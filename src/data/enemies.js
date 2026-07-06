@@ -1,0 +1,65 @@
+// Data-driven enemy archetypes. Behaviour is selected by `ai`; stats scale with
+// dungeon depth via the multipliers in Enemy.js. Adding an enemy = adding an entry.
+export const ENEMY_TYPES = {
+  melee: {
+    name: 'Grunt',
+    ai: 'melee',
+    radius: 15,
+    health: 34,
+    speed: 128,
+    damage: 10,
+    color: '#e8574a',
+    accent: '#ff8a7a',
+    xp: 6,
+    gold: 2,
+    knockbackResist: 0,
+    attack: { range: 34, cooldown: 1.0, windup: 0.35, lunge: 300, knockback: 200 },
+  },
+  ranged: {
+    name: 'Sniper',
+    ai: 'ranged',
+    radius: 13,
+    health: 22,
+    speed: 96,
+    damage: 8,
+    color: '#3fb6e8',
+    accent: '#8fe0ff',
+    xp: 8,
+    gold: 3,
+    knockbackResist: 0.1,
+    preferredDist: 220,
+    attack: { range: 380, cooldown: 1.6, windup: 0.5, projSpeed: 300, knockback: 120 },
+  },
+  tank: {
+    name: 'Brute',
+    ai: 'tank',
+    radius: 24,
+    health: 120,
+    speed: 66,
+    damage: 18,
+    color: '#8a6bd6',
+    accent: '#c3a8ff',
+    xp: 16,
+    gold: 6,
+    knockbackResist: 0.7,
+    attack: { range: 46, cooldown: 1.6, windup: 0.6, lunge: 180, knockback: 340 },
+  },
+};
+
+// Boss definition, referenced by Boss.js. Phases keyed by remaining-HP fraction.
+export const BOSS_DEF = {
+  name: 'The Hollow King',
+  radius: 46,
+  health: 900,
+  speed: 82,
+  color: '#d64f7a',
+  accent: '#ffb0cf',
+  xp: 200,
+  gold: 120,
+  contactDamage: 16,
+  phases: [
+    { at: 1.0, name: 'Awakening', speedMult: 1.0, cooldownMult: 1.0 },
+    { at: 0.66, name: 'Fury',      speedMult: 1.2, cooldownMult: 0.78 },
+    { at: 0.33, name: 'Desperation', speedMult: 1.45, cooldownMult: 0.6 },
+  ],
+};
