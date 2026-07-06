@@ -103,8 +103,9 @@ export class Screens {
     const shop = g.shopMode;
     const items = shop ? g.shopItems : g.upgradeChoices;
 
-    ui.text(shop ? 'SHOP' : 'CHOOSE A BOON', this.W / 2, 78,
-      { font: 'bold 34px "Trebuchet MS", system-ui', align: 'center', color: '#eaf1ff', shadow: true });
+    const title = shop ? 'SHOP' : g.choiceSource === 'relic' ? 'CHOOSE A RELIC' : 'CHOOSE A BOON';
+    ui.text(title, this.W / 2, 78,
+      { font: 'bold 34px "Trebuchet MS", system-ui', align: 'center', color: g.choiceSource === 'relic' && !shop ? '#ffd9a0' : '#eaf1ff', shadow: true });
     if (shop) ui.text(`◆ ${g.player.gold} gold`, this.W / 2, 108, { font: 'bold 18px system-ui', align: 'center', color: '#ffd23f' });
     else ui.text('press 1 · 2 · 3 or click', this.W / 2, 108, { font: '14px system-ui', align: 'center', color: '#8fa4cc' });
 

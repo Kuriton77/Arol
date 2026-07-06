@@ -160,8 +160,15 @@ export class HUD {
     const c = this.ctx;
     const owned = game.ownedUpgrades;
     if (!owned || !owned.length) return;
-    const y = c.canvas.height - 24;
     c.textAlign = 'left'; c.textBaseline = 'middle';
+    // Active synergies in gold above the boon list.
+    const syns = game.synergy ? game.synergy.activeList() : [];
+    if (syns.length) {
+      c.font = 'bold 12px "Trebuchet MS", system-ui';
+      c.fillStyle = 'rgba(255,210,63,0.9)';
+      c.fillText('⚡ ' + syns.map((s) => s.name).join('  ·  '), 16, c.canvas.height - 42);
+    }
+    const y = c.canvas.height - 24;
     c.font = '12px "Trebuchet MS", system-ui';
     c.fillStyle = 'rgba(200,210,235,0.75)';
     // Aggregate counts.
@@ -171,6 +178,10 @@ export class HUD {
       const u = owned.find((x) => x.id === id);
       return n > 1 ? `${u.name} x${n}` : u.name;
     });
-    c.fillText(parts.join('  ·  '), 16, y);
+    let line = parts.join('  ·  ');
+    if (c.measureText(line).width > c.canvas.width - 220) {
+      line = `${owned.length} boons & relics collected`;
+    }
+    c.fillText(line, 16, y);
   }
 }

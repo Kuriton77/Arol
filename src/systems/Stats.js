@@ -27,6 +27,32 @@ export function createStats(weapon) {
     berserk: false,
     greed: 0,
     healOnPick: 0,
+    // element / status accumulators (relics & elemental boons)
+    chill: 0,
+    chillPower: 0,
+    poison: 0,
+    static: 0,
+    dotAmp: 0,
+    // defense & utility
+    armor: 0,
+    dodge: 0,
+    regen: 0,
+    fragile: 0,
+    cull: 0,
+    secondWind: false,
+    secondWindUsed: false,
+    roomHeal: 0,
+    healOnKill: 0,
+    // offense & mobility
+    moveDamage: 0,
+    frenzy: 0,
+    killSpeed: 0,
+    killSpeedT: 0,
+    dashCrit: false,
+    projDamageMult: 1,
+    // economy
+    xpMult: 0,
+    shopDiscount: 0,
     // weapon-framework accumulators (weapon-exclusive boons write these)
     comboWindowMult: 1,
     finisherMult: 1,
@@ -55,8 +81,12 @@ export function createStats(weapon) {
 // Derived, read-only accessors. Kept as functions to reflect live modifier state.
 export const derive = {
   maxHealth: (s) => Math.max(20, CONFIG.player.maxHealth + s.maxHealthBonus),
-  moveSpeed: (s) => CONFIG.player.speed * s.speedMult,
-  attackCooldown: (s) => s.baseCooldown / (s.attackSpeedMult * (s.surgeT > 0 ? 1.3 : 1)),
+  moveSpeed: (s) => CONFIG.player.speed * s.speedMult
+    * (s.killSpeedT > 0 && s.killSpeed > 0 ? 1 + s.killSpeed : 1),
+  attackCooldown: (s, hpFrac = 1) =>
+    s.baseCooldown / (s.attackSpeedMult
+      * (s.surgeT > 0 ? 1.3 : 1)
+      * (s.frenzy > 0 && hpFrac < 0.5 ? 1 + s.frenzy : 1)),
   range: (s) => s.baseRange * s.rangeMult,
   arc: (s) => Math.min(Math.PI * 1.4, s.baseArc * s.arcMult),
   knockback: (s) => s.baseKnockback * s.knockbackMult,

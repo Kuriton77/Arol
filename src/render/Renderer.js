@@ -199,6 +199,17 @@ export class Renderer {
 
     if (e.isElite) { c.shadowColor = e.accent; c.shadowBlur = 14; }
 
+    // Status rings: chill (icy blue) and damage-over-time (ember orange).
+    if (e.chillT > 0) {
+      c.strokeStyle = 'rgba(140,210,255,0.7)'; c.lineWidth = 2.5;
+      c.beginPath(); c.arc(0, 0, e.radius + 3, 0, TAU); c.stroke();
+    }
+    if (e.dots.length > 0) {
+      c.strokeStyle = 'rgba(255,150,70,0.6)'; c.lineWidth = 2;
+      const a0 = performance.now() / 200;
+      c.beginPath(); c.arc(0, 0, e.radius + 6, a0, a0 + 1.6); c.stroke();
+    }
+
     c.fillStyle = body;
     c.strokeStyle = flash ? '#fff' : e.accent;
     c.lineWidth = 2;

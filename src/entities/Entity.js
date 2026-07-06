@@ -16,7 +16,9 @@ export class Entity {
     this._kx = 0; this._ky = 0;   // active knockback velocity
     this.hurtFlash = 0;           // >0 = show white flash
     this.iframes = 0;             // invulnerability timer
-    // Damage-over-time (burn) stacks: {dps, time}
+    this.chillT = 0;              // chill (slow) timer
+    this.chillFactor = 0.62;      // speed multiplier while chilled
+    // Damage-over-time (burn/poison) stacks: {dps, time}
     this.dots = [];
   }
 
@@ -52,6 +54,7 @@ export class Entity {
 
     if (this.hurtFlash > 0) this.hurtFlash -= dt;
     if (this.iframes > 0) this.iframes -= dt;
+    if (this.chillT > 0) this.chillT -= dt;
 
     // Damage over time.
     for (let i = this.dots.length - 1; i >= 0; i--) {

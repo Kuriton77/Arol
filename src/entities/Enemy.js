@@ -365,8 +365,9 @@ export class Enemy extends Entity {
         break;
     }
 
-    this.vx = mv.x * this.speed;
-    this.vy = mv.y * this.speed;
+    const effSpeed = this.speed * (this.chillT > 0 ? this.chillFactor : 1);
+    this.vx = mv.x * effSpeed;
+    this.vy = mv.y * effSpeed;
     this.x += this.vx * dt;
     this.y += this.vy * dt;
     this.integrate(dt, ctx.bounds);

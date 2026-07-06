@@ -136,6 +136,50 @@ const weaponResults = await page.evaluate(() => {
 for (const [id, r] of Object.entries(weaponResults)) {
   assert(r.dealt > 0, `weapon '${id}' deals damage (${Math.round(r.dealt)})`);
 }
+// --- Relics & synergies: pools sized, tags tracked, synergies activate ---
+const relicPhase = await page.evaluate(async () => {
+  const g = window.__AROL__;
+  const { RELICS } = await import('./src/data/relics.js');
+  const { UPGRADES } = await import('./src/data/upgrades.js');
+  const { SYNERGIES } = await import('./src/systems/SynergySystem.js');
+  g.save.data.selectedWeapon = 'sword';
+  g.startRun();
+  // Apply a fire relic + lightning boon → Plasma Burst synergy must activate.
+  const ember = RELICS.find((r) => r.id === 'r_ember_heart');
+  const chain = UPGRADES.find((u) => u.id === 'chain');
+  g._applyUpgrade(ember);
+  g._applyUpgrade(chain);
+  const active = [...g.synergy.active];
+  // Fight a room to exercise on-hit synergy effects.
+  const combat = g.dungeon.rooms.find((r) => r.type === 'combat');
+  g._enterRoom(combat, null, false);
+  for (let f = 0; f < 60 * 5; f++) {
+    const inp = g.input;
+    inp.keys.clear();
+    const t = g.enemies.find((e) => e.alive);
+    if (!t) break;
+    inp.mouse.x = t.x; inp.mouse.y = t.y; inp.mouse.down = true;
+    if (t.x > g.player.x) inp.keys.add('d'); else inp.keys.add('a');
+    if (f % 50 === 0) inp._downThisFrame.add(' ');
+    g.update(1 / 60);
+    if (g.state === 'upgrade') g._pickUpgrade(g.upgradeChoices[0]);
+    if (g.state !== 'playing') break;
+  }
+  return {
+    relicCount: RELICS.length,
+    upgradeCount: UPGRADES.length,
+    synergyCount: SYNERGIES.length,
+    tags: g.ownedTags,
+    active,
+    state: g.state,
+  };
+});
+console.log('  relic phase:', JSON.stringify(relicPhase));
+assert(relicPhase.relicCount >= 60, `60+ relics defined (${relicPhase.relicCount})`);
+assert(relicPhase.upgradeCount + 18 >= 80, `80+ upgrades incl. weapon pools (${relicPhase.upgradeCount}+18)`);
+assert(relicPhase.synergyCount >= 14, `14+ synergies defined (${relicPhase.synergyCount})`);
+assert(relicPhase.active.includes('plasma'), 'fire+lightning activates Plasma Burst');
+
 // --- Enemy expansion: every archetype must run its AI without errors ---
 const enemyPhase = await page.evaluate(async () => {
   const g = window.__AROL__;

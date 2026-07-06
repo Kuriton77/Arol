@@ -17,6 +17,7 @@ export class Boss extends Entity {
     this.accent = BOSS_DEF.accent;
     this.contactDamage = BOSS_DEF.contactDamage * scale;
     this.knockbackResist = 0.85;
+    this.isBossEntity = true; // excluded from execute/stun effects
 
     this.state = 'idle';
     this.stateTimer = 1.2;

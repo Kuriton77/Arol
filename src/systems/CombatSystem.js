@@ -46,7 +46,11 @@ export class CombatSystem {
     if (opts.mult) dmg *= opts.mult;
     // First-strike boons reward opening hits on untouched enemies.
     if (s.firstStrikePct > 0 && target.health >= target.maxHealth) dmg *= 1 + s.firstStrikePct;
-    const crit = Math.random() < s.critChance;
+    // Windrunner: bonus while the player is on the move.
+    if (s.moveDamage > 0 && Math.hypot(c.player.vx, c.player.vy) > 30) dmg *= 1 + s.moveDamage;
+    // Dash-crit boons guarantee the first hit after a dash crits.
+    let crit = Math.random() < s.critChance;
+    if (c.player._dashCritReady) { crit = true; c.player._dashCritReady = false; }
     if (crit) {
       dmg *= s.critMult;
       if (s.bleedOnCrit > 0) target.addBurn(dmg * 0.1 * s.bleedOnCrit, 2.5);
@@ -72,11 +76,31 @@ export class CombatSystem {
 
     // Lifesteal.
     if (s.lifesteal > 0) c.player.heal(dmg * s.lifesteal);
-    // Burn (DoT).
-    if (s.burn > 0 && !opts.noStatus) target.addBurn(dmg * 0.12 * s.burn, 2.0);
+    // Status effects (amplified by dotAmp).
+    if (!opts.noStatus) {
+      const amp = 1 + s.dotAmp;
+      if (s.burn > 0) target.addBurn(dmg * 0.12 * s.burn * amp, 2.0);
+      if (s.poison > 0) target.addBurn(dmg * 0.08 * s.poison * amp, 3.5);
+      if (s.chill > 0) {
+        target.chillT = Math.max(target.chillT, 1.4 + s.chill * 0.3);
+        target.chillFactor = Math.max(0.3, 0.62 - s.chillPower);
+        if (c.synergy) c.synergy.onChillApplied(target);
+      }
+      if (s.static > 0 && Math.random() < 0.35 * s.static) this._chain(target, dmg * 0.4, 1);
+    }
     // Chain lightning to a nearby other target.
     if (s.chain > 0 && !opts.noChain) this._chain(target, dmg * 0.5, s.chain);
 
+    // Culling Strike: execute low-health non-boss enemies outright.
+    if (!target.dead && s.cull > 0 && !target.isBossEntity &&
+        target.health / target.maxHealth < s.cull) {
+      target.health = 0; target.dead = true;
+      c.damageNumbers.add(target.x, target.y - target.radius, 0, { text: 'CULLED', color: '#b45cff' });
+      c.particles.burst(target.x, target.y, '#b45cff', 10, { speed: 200, life: 0.4 });
+      if (c.synergy) c.synergy.onCull(target);
+    }
+
+    if (c.synergy) c.synergy.onHit(target, dmg, crit);
     if (target.dead) c.onKilled(target);
     return true;
   }
@@ -152,7 +176,7 @@ export class CombatSystem {
           c.projectiles.spawn({
             x: p.x, y: p.y, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed,
             radius: shape === 'bolt' ? 8 : 6,
-            damage: dmgBase * stepMult,
+            damage: dmgBase * stepMult * s.projDamageMult,
             hostile: false, color: p.weapon.vfx.color,
             life: 2.2, pierce: (step.pierce ?? 0) + s.arrowPierce, knockback: kb * 0.6,
           });
@@ -166,7 +190,7 @@ export class CombatSystem {
           const a = (i / n) * Math.PI * 2 + p.swingDir;
           c.projectiles.spawn({
             x: p.x, y: p.y, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed,
-            radius: 8, damage: dmgBase * stepMult,
+            radius: 8, damage: dmgBase * stepMult * s.projDamageMult,
             hostile: false, color: p.weapon.vfx.color,
             life: 1.4, pierce: s.arrowPierce, knockback: kb * 0.6,
           });
@@ -181,7 +205,7 @@ export class CombatSystem {
         c.projectiles.spawn({
           x: p.x, y: p.y,
           vx: Math.cos(p.swingDir) * 340, vy: Math.sin(p.swingDir) * 340,
-          radius: 16, damage: dmgBase * 0.8 * s.shockwave,
+          radius: 16, damage: dmgBase * 0.8 * s.shockwave * s.projDamageMult,
           hostile: false, color: '#ffd9c0', life: 0.8, pierce: 99, knockback: kb,
         });
         c.audio.play('shoot');
@@ -196,7 +220,7 @@ export class CombatSystem {
           const a = p.swingDir + off;
           c.projectiles.spawn({
             x: p.x, y: p.y, vx: Math.cos(a) * 520, vy: Math.sin(a) * 520,
-            radius: 8, damage: dmgBase * 0.6,
+            radius: 8, damage: dmgBase * 0.6 * s.projDamageMult,
             hostile: false, color: '#ffe08a', life: 0.9, pierce: 1, knockback: 120,
           });
         }
@@ -288,11 +312,33 @@ export class CombatSystem {
   _damagePlayer(amount, srcX, srcY, knockback) {
     const c = this.ctx;
     const p = c.player;
+    const s = p.stats;
     if (p.iframes > 0) return;
+    // Dodge: fully avoid the hit.
+    if (s.dodge > 0 && Math.random() < Math.min(0.5, s.dodge)) {
+      c.damageNumbers.add(p.x, p.y - p.radius, 0, { text: 'DODGE', color: '#8fe0ff' });
+      p.iframes = 0.25;
+      return;
+    }
     // Colossus boon: damage reduction while mid-swing.
-    if (p.stats.guardSwing && p.attackPhase !== 'idle') amount *= 0.75;
+    if (s.guardSwing && p.attackPhase !== 'idle') amount *= 0.75;
+    // Armor reduces, fragility (void bargains) amplifies.
+    amount *= (1 - Math.min(0.6, s.armor)) * (1 + s.fragile);
     const dmg = Math.round(amount);
+    // Second Wind: survive one lethal hit per floor.
+    if (dmg >= p.health && s.secondWind && !s.secondWindUsed) {
+      s.secondWindUsed = true;
+      p.health = 1;
+      p.iframes = 1.6;
+      c.damageNumbers.add(p.x, p.y - p.radius - 8, 0, { text: 'SECOND WIND', color: '#ffd23f', crit: true });
+      c.particles.burst(p.x, p.y, '#ffd23f', 24, { speed: 280, life: 0.6 });
+      c.audio.play('levelup');
+      c.camera.addShake(10);
+      if (c.synergy) c.synergy.onSecondWind();
+      return;
+    }
     if (!p.hurt(dmg)) return;
+    if (c.synergy) c.synergy.onHurt();
     p.iframes = CONFIG.player.hurtIframes;
     const dx = p.x - srcX, dy = p.y - srcY;
     const len = Math.hypot(dx, dy) || 1;

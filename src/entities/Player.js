@@ -59,6 +59,7 @@ export class Player extends Entity {
     this.iframes = Math.max(this.iframes, CONFIG.player.dash.iframes);
     // Dash-triggered damage windows (Riposte / Shadow Dance boons).
     if (this.stats.dashBuffPct > 0) this.stats.dashBuffT = 2.0;
+    if (this.stats.dashCrit) this._dashCritReady = true;
     return true;
   }
 
@@ -71,7 +72,7 @@ export class Player extends Entity {
     this.facing = this.swingDir;
     this.attackPhase = 'windup';
     this.attackTimer = step.windup ?? CONFIG.player.attack.windup;
-    this.attackCd = derive.attackCooldown(this.stats) * (step.cd ?? 1);
+    this.attackCd = derive.attackCooldown(this.stats, this.health / this.maxHealth) * (step.cd ?? 1);
     this._hitThisSwing.clear();
     this._firedProjectile = false;
     this._lunged = false;
@@ -87,6 +88,8 @@ export class Player extends Entity {
     if (this.comboTimer > 0) this.comboTimer -= dt;
     if (this.stats.dashBuffT > 0) this.stats.dashBuffT -= dt;
     if (this.stats.surgeT > 0) this.stats.surgeT -= dt;
+    if (this.stats.killSpeedT > 0) this.stats.killSpeedT -= dt;
+    if (this.stats.regen > 0 && this.health < this.maxHealth) this.heal(this.stats.regen * dt);
 
     // --- attack phase machine ---
     const step = this.currentStep;

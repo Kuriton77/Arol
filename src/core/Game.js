@@ -14,8 +14,10 @@ import { SpawnSystem } from '../systems/SpawnSystem.js';
 import { generateDungeon } from '../dungeon/Generator.js';
 import { DIRS } from '../dungeon/Room.js';
 import { drawUpgrades, UPGRADES, RARITY } from '../data/upgrades.js';
+import { RELICS } from '../data/relics.js';
 import { META_UPGRADES } from '../data/meta.js';
 import { WEAPONS, weaponById } from '../data/weapons.js';
+import { SynergySystem } from '../systems/SynergySystem.js';
 import { Renderer } from '../render/Renderer.js';
 import { HUD } from '../ui/HUD.js';
 import { UI } from '../ui/UI.js';
@@ -62,8 +64,11 @@ export class Game {
     // Transition / overlay state.
     this.fade = 0;
     this._transition = null;   // { room, dir, t }
-    this.upgradeQueue = 0;
+    this.upgradeQueue = [];    // pending choice sources: 'boon' | 'relic'
     this.upgradeChoices = [];
+    this.choiceSource = 'boon';
+    this.ownedTags = {};       // synergy tag counts
+    this.synergy = new SynergySystem(this);
     this.shopMode = false;
     this.shopItems = null;
     this.eventResult = null;
@@ -83,6 +88,7 @@ export class Game {
       bus: this.bus,
       hitPause: (s) => { this.hitPauseTimer = Math.max(this.hitPauseTimer, s); },
       onKilled: (t) => this._onKilled(t),
+      synergy: this.synergy,
     });
     // CombatSystem reads player via getter; patch ctx to expose it directly.
     Object.defineProperty(this.combat.ctx, 'player', { get: () => this.player });
@@ -125,6 +131,9 @@ export class Game {
     this.soulsEarned = 0;
     this.ownedUpgrades = [];
     this.ownedCounts = {};
+    this.ownedTags = {};
+    this.upgradeQueue = [];
+    this.synergy.reset();
 
     const weapon = weaponById(this.save.data.selectedWeapon);
     this.player = new Player(CONFIG.world.width / 2, CONFIG.world.height / 2, weapon);
@@ -149,6 +158,7 @@ export class Game {
   _buildFloor() {
     const seed = (Date.now() ^ (this.floor * 2654435761)) >>> 0;
     this.rng = makeRng(seed);
+    if (this.player) this.player.stats.secondWindUsed = false; // once per floor
     this.spawnSystem = new SpawnSystem(this.rng);
     this.dungeon = generateDungeon(this.rng, this.floor - 1);
     this.enemies = [];
@@ -224,12 +234,13 @@ export class Game {
       room.locked = false;
       this.roomsCleared++;
       this.soulsEarned += 3;
+      if (this.player.stats.roomHeal > 0) this.player.heal(this.player.stats.roomHeal);
       if (this.isBossRoom) {
         this._pendingVictory = true;
       } else {
         this.audio.setMood('explore');
         // Reward for clearing a combat/elite room: a free boon.
-        this._queueUpgrades(1, 'clear');
+        this._queueUpgrades(1, 'boon');
       }
     }
   }
@@ -258,25 +269,27 @@ export class Game {
   }
 
   // ------------------------------------------------------------- upgrades/loot
-  _queueUpgrades(n, source) {
-    this.upgradeQueue += n;
-    this._upgradeSource = source;
+  // source: 'boon' (level-ups, room clears) or 'relic' (treasure, boss kills).
+  _queueUpgrades(n, source = 'boon') {
+    for (let i = 0; i < n; i++) this.upgradeQueue.push(source);
     if (this.state === GAME_STATE.PLAYING) this._openNextUpgrade();
   }
 
   _openNextUpgrade() {
-    if (this.upgradeQueue <= 0) { this._setState(GAME_STATE.PLAYING); return; }
+    if (this.upgradeQueue.length === 0) { this._setState(GAME_STATE.PLAYING); return; }
     this.shopMode = false;
-    this.upgradeChoices = drawUpgrades(this.rng, CONFIG.progression.upgradesOnLevel, this.ownedCounts, this.boonPool);
-    if (!this.upgradeChoices.length) { this.upgradeQueue = 0; this._setState(GAME_STATE.PLAYING); return; }
+    this.choiceSource = this.upgradeQueue[0];
+    const pool = this.choiceSource === 'relic' ? RELICS : this.boonPool;
+    this.upgradeChoices = drawUpgrades(this.rng, CONFIG.progression.upgradesOnLevel, this.ownedCounts, pool);
+    if (!this.upgradeChoices.length) { this.upgradeQueue.length = 0; this._setState(GAME_STATE.PLAYING); return; }
     this._setState(GAME_STATE.UPGRADE);
   }
 
   _pickUpgrade(u) {
     this._applyUpgrade(u);
     this.audio.play('levelup');
-    this.upgradeQueue--;
-    if (this.upgradeQueue > 0) this._openNextUpgrade();
+    this.upgradeQueue.shift();
+    if (this.upgradeQueue.length > 0) this._openNextUpgrade();
     else this._setState(GAME_STATE.PLAYING);
   }
 
@@ -290,6 +303,16 @@ export class Game {
       this.player.stats.healOnPick = 0;
     }
     if (this.player.health <= 0) this.player.health = 1; // glass cannon safety
+    // Track synergy tags; announce any newly-unlocked synergies.
+    if (u.tags) for (const t of u.tags) this.ownedTags[t] = (this.ownedTags[t] || 0) + 1;
+    const fresh = this.synergy.recheck(this.ownedTags);
+    for (const syn of fresh) {
+      this.prompt = `SYNERGY UNLOCKED — ${syn.name}: ${syn.desc}`;
+      this.audio.play('victory');
+      this.particles.burst(this.player.x, this.player.y, '#ffd23f', 26, { speed: 300, life: 0.7 });
+      const expected = this.prompt;
+      setTimeout(() => { if (this.prompt === expected) this.prompt = null; }, 4000);
+    }
   }
 
   // -------------------------------------------------------------- interactions
@@ -303,7 +326,7 @@ export class Game {
     if (room.reward.kind === 'upgrade') {
       room.rewardTaken = true;
       this.prompt = null;
-      this._queueUpgrades(1, 'treasure');
+      this._queueUpgrades(1, 'relic');
     } else if (room.reward.kind === 'shop') {
       this._openShop();
     } else if (room.reward.kind === 'event') {
@@ -316,9 +339,10 @@ export class Game {
     this.shopMode = true;
     const picks = drawUpgrades(this.rng, 3, this.ownedCounts, this.boonPool);
     const costBase = { common: 8, rare: 14, epic: 22, legendary: 35 };
+    const discount = 1 - Math.min(0.5, this.player.stats.shopDiscount);
     this.shopItems = picks.map((u) => ({
       upgrade: u,
-      cost: Math.round(costBase[u.rarity] * (1 + (this.floor - 1) * 0.3)),
+      cost: Math.max(1, Math.round(costBase[u.rarity] * (1 + (this.floor - 1) * 0.3) * discount)),
       bought: false,
     }));
     this._setState(GAME_STATE.UPGRADE);
@@ -380,20 +404,26 @@ export class Game {
     this.audio.play('die');
     this.kills++;
     this.soulsEarned += 1;
-    // Resonance boon: kills grant a short attack-speed surge.
-    if (this.player.stats.surgeOnKill) this.player.stats.surgeT = 3.0;
+    const s = this.player.stats;
+    // Kill-triggered boons.
+    if (s.surgeOnKill) s.surgeT = 3.0;
+    if (s.killSpeed > 0) s.killSpeedT = 2.0;
+    if (s.healOnKill > 0) this.player.heal(s.healOnKill);
+    this.synergy.onKill(target);
+    const xpBoost = 1 + s.xpMult;
 
     if (target === this.boss) {
       this.player.gold += Math.round(target.def.gold * greed);
-      const lv = this.player.gainXp(target.def.xp);
-      this._queueUpgrades(lv, 'level');
+      const lv = this.player.gainXp(Math.round(target.def.xp * xpBoost));
+      this._queueUpgrades(lv, 'boon');
+      this._queueUpgrades(1, 'relic'); // bosses always drop a relic
       // Victory handled by _checkRoomClear.
       return;
     }
     // Regular enemy.
     this.player.gold += Math.round((target.goldValue || 0) * greed);
-    const levels = this.player.gainXp(target.xpValue || 0);
-    if (levels > 0) this._queueUpgrades(levels, 'level');
+    const levels = this.player.gainXp(Math.round((target.xpValue || 0) * xpBoost));
+    if (levels > 0) this._queueUpgrades(levels, 'boon');
   }
 
   _gameOver() {
@@ -487,8 +517,13 @@ export class Game {
     // --- player input ---
     if (input.wasPressed(' ')) {
       const axis = input.moveAxis();
-      if (p.tryDash(axis.x, axis.y)) { this.audio.play('dash'); this.camera.addShake(2); }
+      if (p.tryDash(axis.x, axis.y)) {
+        this.audio.play('dash');
+        this.camera.addShake(2);
+        this.synergy.onDash();
+      }
     }
+    if (p.isDashing) this.synergy.dashTick(dt);
     if (input.mouse.down) {
       // Shot/bolt steps play their SFX at fire time in CombatSystem.
       if (p.tryAttack(input.mouse.x, input.mouse.y)) {
@@ -554,7 +589,7 @@ export class Game {
     this._tryTransition();
     this._tryReward();
 
-    if (this._pendingVictory && this.upgradeQueue <= 0) {
+    if (this._pendingVictory && this.upgradeQueue.length === 0) {
       this._pendingVictory = false;
       this._victory();
     }
