@@ -103,12 +103,12 @@ function buildRoomContent(room, rng, depthLevel) {
   switch (room.type) {
     case ROOM.COMBAT: {
       const budget = 3 + Math.floor(d * 0.8);
-      room.enemyPlan = planEnemies(rng, budget, false);
+      room.enemyPlan = planEnemies(rng, budget, false, d);
       break;
     }
     case ROOM.ELITE: {
       const budget = 4 + Math.floor(d * 0.9);
-      room.enemyPlan = planEnemies(rng, budget, true);
+      room.enemyPlan = planEnemies(rng, budget, true, d);
       break;
     }
     case ROOM.TREASURE:
@@ -126,19 +126,39 @@ function buildRoomContent(room, rng, depthLevel) {
   }
 }
 
-// Distribute a "threat budget" across enemy archetypes.
-function planEnemies(rng, budget, elite) {
-  const costs = { melee: 1, ranged: 1.4, tank: 2.6 };
-  const plan = { melee: 0, ranged: 0, tank: 0 };
+// Threat roster: cost is the budget price, minDepth gates when an archetype
+// can appear so early rooms teach basics before mixing in complex enemies.
+const ROSTER = [
+  { type: 'melee',        cost: 1.0, minDepth: 0 },
+  { type: 'spider',       cost: 1.0, minDepth: 0 },
+  { type: 'swarmling',    cost: 0.5, minDepth: 0 },
+  { type: 'ranged',       cost: 1.4, minDepth: 1 },
+  { type: 'bomber',       cost: 1.2, minDepth: 1 },
+  { type: 'tank',         cost: 2.6, minDepth: 2 },
+  { type: 'assassin',     cost: 1.8, minDepth: 2 },
+  { type: 'healer',       cost: 1.6, minDepth: 2 },
+  { type: 'shieldknight', cost: 2.2, minDepth: 2 },
+  { type: 'mage',         cost: 2.0, minDepth: 3 },
+  { type: 'charger',      cost: 1.8, minDepth: 3 },
+  { type: 'warden',       cost: 2.0, minDepth: 3 },
+  { type: 'necromancer',  cost: 2.4, minDepth: 4 },
+];
+
+// Distribute a "threat budget" across the archetypes available at this depth.
+function planEnemies(rng, budget, elite, depth = 0) {
+  const available = ROSTER.filter((r) => r.minDepth <= depth);
+  const plan = {};
   let remaining = budget;
-  const types = ['melee', 'ranged', 'tank'];
   let guard = 0;
-  while (remaining > 0.9 && guard++ < 100) {
-    const t = rng.pick(types);
-    if (costs[t] <= remaining) { plan[t]++; remaining -= costs[t]; }
-    else if (costs.melee <= remaining) { plan.melee++; remaining -= costs.melee; }
+  while (remaining > 0.4 && guard++ < 100) {
+    const r = rng.pick(available);
+    if (r.cost <= remaining) { plan[r.type] = (plan[r.type] || 0) + 1; remaining -= r.cost; }
+    else if (ROSTER[0].cost <= remaining) { plan.melee = (plan.melee || 0) + 1; remaining -= 1; }
     else break;
   }
+  // Support enemies need something to support — a lone healer becomes a grunt.
+  const combatCount = Object.entries(plan).filter(([t]) => t !== 'healer').reduce((s, [, n]) => s + n, 0);
+  if (plan.healer && combatCount === 0) { plan.melee = plan.healer; delete plan.healer; }
   const out = Object.entries(plan)
     .filter(([, n]) => n > 0)
     .map(([type, count]) => ({ type, count }));

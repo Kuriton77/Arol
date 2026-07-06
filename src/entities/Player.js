@@ -31,6 +31,7 @@ export class Player extends Entity {
     this.currentStep = weapon.combo[0];
     this._hitThisSwing = new Set();
     this._firedProjectile = false;
+    this.slowT = 0;            // spider-web slow timer
 
     // Progression
     this.level = 1;
@@ -126,7 +127,8 @@ export class Player extends Entity {
       if (this.dashTimer <= 0) this.isDashing = false;
     } else {
       const axis = input.moveAxis();
-      const sp = derive.moveSpeed(this.stats);
+      if (this.slowT > 0) this.slowT -= dt;
+      const sp = derive.moveSpeed(this.stats) * (this.slowT > 0 ? 0.55 : 1);
       // Weapon weight: per-phase movement modifiers.
       const mm = this.weapon.moveMod || {};
       const atkSlow = this.attackPhase === 'active' ? (mm.active ?? 0.55)

@@ -32,6 +32,18 @@ export class SpawnSystem {
     return { enemies, boss };
   }
 
+  // Spawn a specific archetype at an exact position (summons, events, mimics).
+  spawnAt(type, x, y, bounds, depthLevel = 0) {
+    const def = ENEMY_TYPES[type] || ENEMY_TYPES.melee;
+    const pad = CONFIG.world.roomPadding + def.radius;
+    const e = new Enemy(
+      Math.min(bounds.x + bounds.w - pad, Math.max(bounds.x + pad, x)),
+      Math.min(bounds.y + bounds.h - pad, Math.max(bounds.y + pad, y)),
+      def, depthLevel * 4,
+    );
+    return e;
+  }
+
   spawnAdd(boss, bounds, player) {
     const def = ENEMY_TYPES.melee;
     const pos = this._safePos(bounds, player);

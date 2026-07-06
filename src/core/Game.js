@@ -502,15 +502,29 @@ export class Game {
     const ctx = {
       player: p,
       bounds,
+      enemies: () => this.enemies,
       spawnProjectile: (o) => this.projectiles.spawn(o),
+      spawnEnemy: (type, x, y) => {
+        if (this.enemies.length < 60) {
+          const e = this.spawnSystem.spawnAt(type, x, y, bounds, this.floor - 1);
+          e.spawnedBySummon = true;
+          this.enemies.push(e);
+          this.particles.burst(e.x, e.y, e.accent, 8, { speed: 140, life: 0.4 });
+        }
+      },
       spawnAdd: (boss) => {
         if (this.enemies.length < 40) {
           this.enemies.push(this.spawnSystem.spawnAdd(boss, bounds, p));
         }
       },
+      explode: (x, y, r, dmg, color) => this.combat.explode(x, y, r, dmg, color),
       onShoot: () => this.audio.play('shoot'),
       onTelegraph: () => this.audio.play('telegraph'),
       onExecute: () => this.camera.addShake(4),
+      onBlink: (e) => { this.audio.play('blink'); this.particles.burst(e.x, e.y, e.accent, 10, { speed: 160, life: 0.35 }); },
+      onSummon: (e) => { this.audio.play('telegraph'); this.particles.burst(e.x, e.y, e.accent, 12, { speed: 180, life: 0.45 }); },
+      onHeal: (e, target) => this.particles.burst(target.x, target.y, '#c0ffd8', 3, { speed: 60, life: 0.5, drag: 0.95 }),
+      onSlam: (e) => { this.camera.addShake(7); this.audio.play('boom'); this.particles.burst(e.x, e.y, e.accent, 14, { speed: 220, life: 0.4 }); },
     };
     for (const e of this.enemies) if (e.alive) e.update(dt, ctx);
     if (this.boss && this.boss.alive) {

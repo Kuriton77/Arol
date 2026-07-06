@@ -3,7 +3,7 @@
 // crits, damage numbers, knockback, lifesteal, burn, chain lightning, thorns,
 // hit-pause, camera shake, particles and SFX. Systems above stay decoupled by
 // talking to this through a small context object.
-import { inArc, inThrust, circlesOverlap, dist, clamp } from '../core/math.js';
+import { inArc, inThrust, circlesOverlap, dist, clamp, angleDelta } from '../core/math.js';
 import { CONFIG } from '../data/config.js';
 import { derive } from './Stats.js';
 
@@ -29,6 +29,18 @@ export class CombatSystem {
   dealDamage(target, baseDamage, srcX, srcY, opts = {}) {
     const c = this.ctx;
     const s = c.player.stats;
+
+    // Shield Knights block all frontal damage unless mid-attack. Flank them.
+    if (target.def && target.def.blockFrontal && target.state !== 'strike' && target.state !== 'recover') {
+      const aToSrc = Math.atan2(srcY - target.y, srcX - target.x);
+      if (Math.abs(angleDelta(target.facing, aToSrc)) < 1.15) {
+        c.damageNumbers.add(target.x, target.y - target.radius, 0, { text: 'BLOCK', color: '#c0c8d8' });
+        c.particles.burst(target.x, target.y, '#f0f4ff', 5, { dir: aToSrc, spread: 1.2, speed: 140 });
+        c.audio.play('ui');
+        return false;
+      }
+    }
+
     const hpFrac = c.player.health / c.player.maxHealth;
     let dmg = baseDamage != null ? baseDamage : derive.damage(s, hpFrac);
     if (opts.mult) dmg *= opts.mult;
@@ -201,6 +213,7 @@ export class CombatSystem {
         // Enemy/boss projectile vs player.
         if (p.iframes <= 0 && circlesOverlap(pr.x, pr.y, pr.radius, p.x, p.y, p.radius)) {
           this._damagePlayer(pr.damage, pr.x, pr.y, pr.knockback);
+          if (pr.slow) p.slowT = Math.max(p.slowT || 0, 1.6); // spider webs
           pr.dead = true;
         }
       } else {
@@ -235,6 +248,29 @@ export class CombatSystem {
         circlesOverlap(boss.x, boss.y, boss.radius, p.x, p.y, p.radius)) {
       this._damagePlayer(boss.contactDamage, boss.x, boss.y, 380);
       this._thorns(boss, p);
+    }
+  }
+
+  // Area explosion (bombers, hazards, boss slams). Hurts the player at full
+  // damage and other enemies at half — friendly fire rewards baiting bombers.
+  explode(x, y, radius, damage, color = '#ffd98a') {
+    const c = this.ctx;
+    c.particles.burst(x, y, color, 26, { speed: 320, life: 0.55 });
+    c.particles.burst(x, y, '#fff2d0', 10, { speed: 160, life: 0.3 });
+    c.camera.addShake(8);
+    c.audio.play('boom');
+    const p = c.player;
+    if (dist(p.x, p.y, x, y) < radius + p.radius) {
+      this._damagePlayer(damage, x, y, 340);
+    }
+    for (const e of this._allTargets()) {
+      if (!e.alive || e.suicided) continue;
+      if (dist(e.x, e.y, x, y) < radius + e.radius) {
+        if (e.hurt(Math.round(damage * 0.5))) {
+          c.damageNumbers.add(e.x, e.y - e.radius, Math.round(damage * 0.5), { color: '#ffd98a' });
+          if (e.dead) c.onKilled(e);
+        }
+      }
     }
   }
 

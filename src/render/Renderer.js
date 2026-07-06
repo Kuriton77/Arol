@@ -155,52 +155,148 @@ export class Renderer {
   }
 
   _enemy(c, e) {
+    // Charger: telegraph the charge line across the room while winding up.
+    if (e.ai === 'charger' && e.state === 'windup') {
+      c.save();
+      c.globalAlpha = 0.15 + e.telegraph * 0.3;
+      c.strokeStyle = e.accent; c.lineWidth = e.radius * 1.4;
+      c.beginPath(); c.moveTo(e.x, e.y);
+      c.lineTo(e.x + Math.cos(e.facing) * 600, e.y + Math.sin(e.facing) * 600);
+      c.stroke();
+      c.restore();
+    }
+    // Healer: channel beam to its heal target.
+    if (e.ai === 'healer' && e.healTarget && e.healTarget.alive) {
+      c.save();
+      c.globalAlpha = 0.4 + Math.sin(performance.now() / 90) * 0.15;
+      c.strokeStyle = '#7effbe'; c.lineWidth = 2.5;
+      c.setLineDash([6, 6]);
+      c.beginPath(); c.moveTo(e.x, e.y); c.lineTo(e.healTarget.x, e.healTarget.y); c.stroke();
+      c.restore();
+    }
+
     c.save();
     c.translate(e.x, e.y);
     const flash = e.hurtFlash > 0;
     const body = flash ? '#ffffff' : e.color;
 
-    // Telegraph ring during windup.
+    // Assassin vanish shimmer.
+    if (e.invisible) c.globalAlpha = 0.18;
+
+    // Telegraph ring during windup (bomber pulses faster as it primes).
     if (e.telegraph > 0) {
       c.save();
-      c.globalAlpha = 0.35 + e.telegraph * 0.35;
-      c.strokeStyle = '#ffdf6b';
+      const pulse = e.ai === 'bomber' ? (Math.sin(performance.now() / (60 - e.telegraph * 35)) > 0 ? 0.5 : 0.15) : 0;
+      c.globalAlpha = 0.35 + e.telegraph * 0.35 + pulse;
+      c.strokeStyle = e.ai === 'bomber' ? '#ff7b4a' : '#ffdf6b';
       c.lineWidth = 3;
-      const r = e.radius + 6 + e.telegraph * 10;
+      const r = e.ai === 'bomber'
+        ? e.def.attack.blastRadius * e.telegraph
+        : e.radius + 6 + e.telegraph * 10;
       c.beginPath(); c.arc(0, 0, r, 0, TAU); c.stroke();
       c.restore();
     }
 
-    if (e.isElite) {
-      c.shadowColor = e.accent; c.shadowBlur = 14;
-    }
+    if (e.isElite) { c.shadowColor = e.accent; c.shadowBlur = 14; }
 
     c.fillStyle = body;
     c.strokeStyle = flash ? '#fff' : e.accent;
     c.lineWidth = 2;
-    if (e.ai === 'ranged') {
-      // Diamond.
-      const r = e.radius;
-      c.beginPath();
-      c.moveTo(0, -r); c.lineTo(r, 0); c.lineTo(0, r); c.lineTo(-r, 0); c.closePath();
-      c.fill(); c.stroke();
-    } else if (e.ai === 'tank') {
-      // Chunky rounded square.
-      const r = e.radius;
-      c.fillRect(-r, -r, r * 2, r * 2);
-      c.strokeRect(-r, -r, r * 2, r * 2);
-    } else {
-      c.beginPath(); c.arc(0, 0, e.radius, 0, TAU); c.fill(); c.stroke();
+    this._shape(c, e.def.shape || 'circle', e.radius, e);
+
+    // Shield Knight: bright frontal shield arc showing the blocked zone.
+    if (e.def.blockFrontal) {
+      c.shadowBlur = 0;
+      c.strokeStyle = e.state === 'strike' ? 'rgba(220,120,120,0.5)' : '#f0f4ff';
+      c.lineWidth = 4;
+      c.beginPath(); c.arc(0, 0, e.radius + 5, e.facing - 1.1, e.facing + 1.1); c.stroke();
     }
+
     // Facing pip.
     c.shadowBlur = 0;
     c.fillStyle = 'rgba(255,255,255,0.85)';
     c.beginPath();
     c.arc(Math.cos(e.facing) * e.radius * 0.55, Math.sin(e.facing) * e.radius * 0.55, 3, 0, TAU);
     c.fill();
+
+    // Stun stars.
+    if (e.state === 'stunned') {
+      c.fillStyle = '#ffe08a';
+      for (let i = 0; i < 3; i++) {
+        const a = performance.now() / 300 + (i / 3) * TAU;
+        c.beginPath();
+        c.arc(Math.cos(a) * (e.radius + 8), Math.sin(a) * (e.radius + 8) * 0.4 - e.radius - 6, 2.5, 0, TAU);
+        c.fill();
+      }
+    }
     c.restore();
 
-    this._healthBar(c, e);
+    if (!e.invisible) this._healthBar(c, e);
+  }
+
+  // Generic body shapes keyed by enemy data.
+  _shape(c, shape, r, e) {
+    switch (shape) {
+      case 'diamond':
+        c.beginPath();
+        c.moveTo(0, -r); c.lineTo(r, 0); c.lineTo(0, r); c.lineTo(-r, 0); c.closePath();
+        c.fill(); c.stroke();
+        break;
+      case 'square':
+        c.fillRect(-r, -r, r * 2, r * 2);
+        c.strokeRect(-r, -r, r * 2, r * 2);
+        break;
+      case 'triangle': {
+        const f = e ? e.facing : 0;
+        c.save(); c.rotate(f);
+        c.beginPath();
+        c.moveTo(r * 1.15, 0); c.lineTo(-r * 0.8, -r * 0.85); c.lineTo(-r * 0.8, r * 0.85);
+        c.closePath(); c.fill(); c.stroke();
+        c.restore();
+        break;
+      }
+      case 'hex': {
+        c.save(); c.rotate(e ? e.spin : 0);
+        c.beginPath();
+        for (let i = 0; i < 6; i++) {
+          const a = (i / 6) * TAU;
+          i ? c.lineTo(Math.cos(a) * r, Math.sin(a) * r) : c.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+        }
+        c.closePath(); c.fill(); c.stroke();
+        c.restore();
+        break;
+      }
+      case 'ring':
+        c.beginPath(); c.arc(0, 0, r, 0, TAU); c.fill(); c.stroke();
+        c.fillStyle = 'rgba(10,10,18,0.75)';
+        c.beginPath(); c.arc(0, 0, r * 0.5, 0, TAU); c.fill();
+        break;
+      case 'spider': {
+        // Legs.
+        c.lineWidth = 1.5;
+        for (let i = 0; i < 4; i++) {
+          const a = (i / 4) * Math.PI - Math.PI / 2 + 0.4;
+          const wig = Math.sin(performance.now() / 80 + i) * 3;
+          c.beginPath();
+          c.moveTo(0, 0);
+          c.lineTo(Math.cos(a) * (r + 7), Math.sin(a) * (r + 7) + wig);
+          c.moveTo(0, 0);
+          c.lineTo(-Math.cos(a) * (r + 7), Math.sin(a) * (r + 7) - wig);
+          c.stroke();
+        }
+        c.lineWidth = 2;
+        c.beginPath(); c.arc(0, 0, r, 0, TAU); c.fill(); c.stroke();
+        break;
+      }
+      case 'cross':
+        c.beginPath(); c.arc(0, 0, r, 0, TAU); c.fill(); c.stroke();
+        c.fillStyle = '#0c1f14';
+        c.fillRect(-r * 0.55, -r * 0.18, r * 1.1, r * 0.36);
+        c.fillRect(-r * 0.18, -r * 0.55, r * 0.36, r * 1.1);
+        break;
+      default:
+        c.beginPath(); c.arc(0, 0, r, 0, TAU); c.fill(); c.stroke();
+    }
   }
 
   _boss(c, boss) {

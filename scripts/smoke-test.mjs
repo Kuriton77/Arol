@@ -136,6 +136,50 @@ const weaponResults = await page.evaluate(() => {
 for (const [id, r] of Object.entries(weaponResults)) {
   assert(r.dealt > 0, `weapon '${id}' deals damage (${Math.round(r.dealt)})`);
 }
+// --- Enemy expansion: every archetype must run its AI without errors ---
+const enemyPhase = await page.evaluate(async () => {
+  const g = window.__AROL__;
+  const { ENEMY_TYPES } = await import('./src/data/enemies.js');
+  const types = Object.keys(ENEMY_TYPES);
+  g.save.data.selectedWeapon = 'sword';
+  g.startRun();
+  const room = g.dungeon.rooms.find((r) => r.type === 'combat');
+  g._enterRoom(room, null, false);
+  // Replace the planned encounter with one of each archetype.
+  g.enemies = types.map((t, i) => {
+    const a = (i / types.length) * Math.PI * 2;
+    return g.spawnSystem.spawnAt(t, 480 + Math.cos(a) * 200, 270 + Math.sin(a) * 160, room.bounds, 0);
+  });
+  const seenStates = new Set();
+  let playerHurt = false;
+  const hp0 = g.player.health;
+  for (let f = 0; f < 60 * 14; f++) {
+    const inp = g.input;
+    inp.keys.clear();
+    const target = g.enemies.find((e) => e.alive);
+    if (!target) break;
+    inp.mouse.x = target.x; inp.mouse.y = target.y; inp.mouse.down = true;
+    if (target.x > g.player.x + 4) inp.keys.add('d'); else inp.keys.add('a');
+    if (target.y > g.player.y + 4) inp.keys.add('s'); else inp.keys.add('w');
+    g.update(1 / 60);
+    for (const e of g.enemies) seenStates.add(e.ai + ':' + e.state);
+    if (g.player.health < hp0) playerHurt = true;
+    if (g.state === 'upgrade') { if (g.shopMode) g._closeShop(); else g._pickUpgrade(g.upgradeChoices[0]); }
+    if (g.state !== 'playing') break;
+  }
+  return {
+    typeCount: types.length,
+    remaining: g.enemies.filter((e) => e.alive).length,
+    playerHurt,
+    states: [...seenStates].length,
+    state: g.state,
+  };
+});
+console.log('  enemy phase:', JSON.stringify(enemyPhase));
+assert(enemyPhase.typeCount >= 14, `14+ enemy archetypes defined (${enemyPhase.typeCount})`);
+assert(enemyPhase.states > 14, `archetypes exercise varied AI states (${enemyPhase.states})`);
+assert(['playing', 'gameover', 'upgrade'].includes(enemyPhase.state), 'sim stayed valid during enemy stress');
+
 // Reset to sword for boss test.
 await page.evaluate(() => { const g = window.__AROL__; g.save.data.selectedWeapon = 'sword'; g.startRun(); });
 

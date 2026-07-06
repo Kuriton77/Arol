@@ -99,6 +99,9 @@ export class AudioManager {
       case 'ui':      this._tone(600, 0.05, 'square', 0.12); break;
       case 'uiconfirm': this._tone(720, 0.07, 'square', 0.15); this._tone(960, 0.08, 'square', 0.13); break;
       case 'bossroar': this._tone(90, 0.6, 'sawtooth', 0.35, null, -30); this._noise(0.5, 0.3, 600); break;
+      case 'boom':    this._tone(70, 0.4, 'sawtooth', 0.35, null, -40); this._noise(0.35, 0.35, 700); break;
+      case 'blink':   this._tone(980, 0.1, 'sine', 0.12, null, -500); break;
+      case 'heal':    this._tone(620, 0.12, 'sine', 0.1); this._tone(930, 0.14, 'sine', 0.08); break;
       case 'telegraph': this._tone(440, 0.15, 'sine', 0.14, null, 120); break;
       case 'gameover': [392, 349, 294, 220].forEach((f, i) => setTimeout(() => this._tone(f, 0.35, 'triangle', 0.25), i * 180)); break;
       case 'victory': [523, 659, 784, 1046, 1318].forEach((f, i) => setTimeout(() => this._tone(f, 0.25, 'triangle', 0.25), i * 130)); break;
