@@ -151,7 +151,7 @@ const PATTERNS = {
 export class Boss extends Entity {
   // `scale` is a { hp, damage } multiplier bundle from the DifficultyManager.
   // Defaults to identity so the boss can be constructed standalone.
-  constructor(x, y, def, scale = { hp: 1, damage: 1 }) {
+  constructor(x, y, def, scale = { hp: 1, damage: 1, pace: 1 }) {
     super(x, y, def.radius);
     this.def = def;
     this.maxHealth = Math.round(def.health * (scale.hp ?? 1));
@@ -161,6 +161,7 @@ export class Boss extends Entity {
     this.accent = def.accent;
     this.contactDamage = def.contactDamage * (scale.damage ?? 1);
     this.projDamage = Math.round(12 * (scale.damage ?? 1));
+    this.pace = scale.pace ?? 1; // ability frequency: idle/recover tick faster
     this.knockbackResist = 0.85;
     this.isBossEntity = true; // excluded from execute/stun effects
 
@@ -204,7 +205,10 @@ export class Boss extends Entity {
     this.spinAngle += dt * 0.6;
 
     let mx = 0, my = 0;
-    this.stateTimer -= dt;
+    // Pace accelerates downtime (idle/recover) — more attacks per minute —
+    // without shortening telegraphs, so fights stay fast but fair.
+    const tick = (this.state === 'idle' || this.state === 'recover') ? dt * this.pace : dt;
+    this.stateTimer -= tick;
 
     switch (this.state) {
       case 'idle': {

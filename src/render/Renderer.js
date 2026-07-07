@@ -6,6 +6,9 @@ import { derive } from '../systems/Stats.js';
 import { TAU } from '../core/math.js';
 import { DIRS } from '../dungeon/Room.js';
 
+// Champion elite affix aura colours (matches the affixes rolled in Enemy.js).
+const AFFIX_COLORS = { swift: '#7ee0ff', brutal: '#ff5a4a', stone: '#c8b088', vampiric: '#ff4f8a' };
+
 export class Renderer {
   constructor(ctx) { this.ctx = ctx; }
 
@@ -289,7 +292,17 @@ export class Renderer {
       c.restore();
     }
 
-    if (e.isElite) { c.shadowColor = e.accent; c.shadowBlur = 14; }
+    // Champion elites: a pulsing affix-coloured aura telegraphs their threat.
+    if (e.isElite) {
+      const affixColor = AFFIX_COLORS[e.affix] || e.accent;
+      const pulse = 0.5 + Math.sin(performance.now() / 220) * 0.25;
+      c.save();
+      c.globalAlpha = pulse;
+      c.strokeStyle = affixColor; c.lineWidth = 2.5;
+      c.beginPath(); c.arc(0, 0, e.radius + 6, 0, TAU); c.stroke();
+      c.restore();
+      c.shadowColor = affixColor; c.shadowBlur = 16;
+    }
 
     // Status rings: chill (icy blue) and damage-over-time (ember orange).
     if (e.chillT > 0) {
