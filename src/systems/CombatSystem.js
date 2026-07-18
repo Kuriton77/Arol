@@ -264,6 +264,11 @@ export class CombatSystem {
         e.hasStruck = true;
         this._damagePlayer(e.damage, e.x, e.y, e.def.attack.knockback);
         this._thorns(e, p);
+        // Vampiric champions recover a chunk of health when they connect.
+        if (e.affix === 'vampiric') {
+          e.health = Math.min(e.maxHealth, e.health + e.maxHealth * 0.12);
+          c.particles.burst(e.x, e.y, '#e8574a', 6, { speed: 120, life: 0.4 });
+        }
       }
     }
 

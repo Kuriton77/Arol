@@ -18,6 +18,29 @@ function boot() {
   const settings = new SettingsManager(); // loads persisted preferences
 
   const game = new Game(canvas, input, audio, save, settings);
+
+  // --- Presentation scaling -------------------------------------------------
+  // The canvas always renders at the fixed logical resolution; CSS sizes the
+  // stage to the largest 16:9 rect that fits the window, multiplied by the
+  // UI Scale. ≤100% shrinks the whole presentation; >100% stays at full
+  // window fill (never cropping) and grows the interface inside instead.
+  // Mouse mapping normalises by the displayed rect, so alignment is automatic.
+  const stage = document.getElementById('stage');
+  let presentationScale = 1;
+  function fitPresentation() {
+    const aspect = CONFIG.world.width / CONFIG.world.height;
+    const availW = window.innerWidth * 0.985;
+    const availH = window.innerHeight - 34; // room for the hint line
+    const fitW = Math.min(availW, availH * aspect);
+    const s = Math.min(1, presentationScale);
+    stage.style.width = Math.max(320, Math.round(fitW * s)) + 'px';
+    stage.style.height = Math.max(180, Math.round((fitW * s) / aspect)) + 'px';
+    game.ui.setScale(Math.max(1, presentationScale));
+  }
+  game.setPresentationScale = (v) => { presentationScale = v; fitPresentation(); };
+  window.addEventListener('resize', fitPresentation);
+  fitPresentation();
+
   // Bind settings to live systems and push loaded values into them. Volumes
   // land on the (not-yet-created) audio nodes' model and are applied on init().
   settings.bind({ audio, game });

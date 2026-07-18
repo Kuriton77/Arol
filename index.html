@@ -25,10 +25,9 @@
       background: radial-gradient(circle at 50% 30%, #12141f 0%, #06070c 70%);
     }
     #stage {
+      /* Size is driven by main.js (largest 16:9 rect × UI Scale) so the game
+         fills the window like a native indie title instead of a fixed box. */
       position: relative;
-      width: min(96vw, 1120px);
-      max-height: 92vh;
-      aspect-ratio: 16 / 9;
       box-shadow: 0 20px 60px rgba(0,0,0,0.6), 0 0 0 1px rgba(120,140,200,0.15);
       border-radius: 10px;
       overflow: hidden;

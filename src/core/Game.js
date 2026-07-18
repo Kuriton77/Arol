@@ -218,8 +218,9 @@ export class Game {
     const seed = (Date.now() ^ (this.floor * 2654435761)) >>> 0;
     this.rng = makeRng(seed);
     if (this.player) this.player.stats.secondWindUsed = false; // once per floor
-    // Advance the difficulty manager to this floor before anything scales.
+    // Advance the difficulty manager (floor + player level) before scaling.
     this.difficulty.setFloor(this.floor);
+    if (this.player) this.difficulty.setPlayerLevel(this.player.level);
     this.spawnSystem = new SpawnSystem(this.rng, this.difficulty);
     this.biome = biomeForFloor(this.floor);
     this.bossDef = bossById(this.biome.bossId);
@@ -271,6 +272,9 @@ export class Game {
       for (const h of room.envHazards) this.hazards.spawn({ ...h });
     }
     if (room.needsClearing) {
+      // Keep scaling current with the player's level (leveling mid-floor makes
+      // subsequent rooms spawn tougher — enemies scale continuously).
+      if (this.player) this.difficulty.setPlayerLevel(this.player.level);
       const { enemies, boss } = this.spawnSystem.spawnRoom(room, this.floor - 1, this.player, this.bossDef);
       this.enemies = enemies;
       this.boss = boss;
@@ -622,8 +626,11 @@ export class Game {
   _onKilled(target) {
     // Reward multipliers: player boons (greed / xpMult) × difficulty scaling.
     const greed = (1 + (this.player.stats.greed || 0)) * this.difficulty.goldMult();
-    this.particles.burst(target.x, target.y, target.color || '#fff', 16, { speed: 260, life: 0.6 });
-    this.camera.addShake(target === this.boss ? 12 : 5);
+    // Layered death effect: coloured gib burst + white flash pop for punch.
+    const big = target === this.boss || target.isElite;
+    this.particles.burst(target.x, target.y, target.color || '#fff', big ? 30 : 16, { speed: big ? 340 : 260, life: 0.6 });
+    this.particles.burst(target.x, target.y, '#ffffff', big ? 14 : 8, { speed: big ? 200 : 150, life: 0.28, size: 4 });
+    this.camera.addShake(target === this.boss ? 14 : target.isElite ? 8 : 5);
     this.audio.play('die');
     this.kills++;
     this.soulsEarned += 1;

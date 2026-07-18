@@ -268,6 +268,8 @@ export class Enemy extends Entity {
     this.health = this.maxHealth;
     this.damage = def.damage * (scale.damage ?? 1);
     this.speed = def.speed * (scale.speed ?? 1);
+    this.pace = scale.pace ?? 1;   // attack-frequency multiplier (deep runs)
+    this.affix = null;             // champion affix when elite
     this.knockbackResist = def.knockbackResist || 0;
     this.color = def.color;
     this.accent = def.accent;
@@ -293,15 +295,23 @@ export class Enemy extends Entity {
     this.wanderAngle = Math.random() * TAU;
   }
 
+  // Elites are champions: besides raw stats they roll an affix that changes
+  // how they play (not just HP inflation).
   makeElite() {
     this.isElite = true;
-    this.maxHealth = Math.round(this.maxHealth * 2.2);
+    this.maxHealth = Math.round(this.maxHealth * 2.4);
     this.health = this.maxHealth;
-    this.damage *= 1.4;
+    this.damage *= 1.45;
     this.speed *= 1.12;
     this.radius *= 1.25;
     this.goldValue *= 3;
     this.xpValue *= 2.5;
+    const affixes = ['swift', 'brutal', 'stone', 'vampiric'];
+    this.affix = affixes[Math.floor(Math.random() * affixes.length)];
+    if (this.affix === 'swift') { this.speed *= 1.3; this.pace *= 1.25; }
+    else if (this.affix === 'brutal') this.damage *= 1.35;
+    else if (this.affix === 'stone') { this.maxHealth = Math.round(this.maxHealth * 1.35); this.health = this.maxHealth; this.knockbackResist = Math.min(0.95, this.knockbackResist + 0.4); }
+    // 'vampiric' heals on striking the player (resolved in CombatSystem).
   }
 
   startWindup() {
@@ -313,7 +323,7 @@ export class Enemy extends Entity {
 
   // ctx: { player, bounds, enemies(), spawnProjectile, spawnEnemy, explode, on* fx hooks }
   update(dt, ctx) {
-    if (this.attackCd > 0) this.attackCd -= dt;
+    if (this.attackCd > 0) this.attackCd -= dt * this.pace; // pace = ability frequency
     if (this.blinkCd > 0) this.blinkCd -= dt;
     const p = ctx.player;
     const d = dist(this.x, this.y, p.x, p.y);

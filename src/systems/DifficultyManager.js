@@ -34,13 +34,35 @@ export function difficultyById(id) {
 
 // --- Automatic per-floor scaling (fraction added per floor beyond floor 1). -
 export const FLOOR_RATES = {
-  hp: 0.05,          // +5%  enemy HP / floor
-  damage: 0.03,      // +3%  enemy damage / floor
-  speed: 0.01,       // +1%  enemy speed / floor
-  spawnRate: 0.02,   // +2%  enemy count / floor
-  eliteChance: 0.005,// +0.5% elite chance / floor
-  gold: 0.03,        // +3%  gold reward / floor
+  hp: 0.20,          // +20% enemy HP / floor — aggressive so foes stay relevant
+  damage: 0.06,      // +6%  enemy damage / floor
+  speed: 0.015,      // +1.5% enemy speed / floor (slight)
+  spawnRate: 0.03,   // +3%  enemy count / floor
+  eliteChance: 0.01, // +1%  elite chance / floor
+  gold: 0.05,        // +5%  gold reward / floor
   xp: 0.03,          // +3%  xp reward / floor
+};
+
+// --- Player-level scaling (fraction added per player level beyond 1). -------
+// Enemies grow with the player's own power so a strong build never fully
+// trivialises the game; rewards don't level-scale (only floors pay more).
+export const LEVEL_RATES = {
+  hp: 0.06,          // +6% enemy HP / player level
+  damage: 0.025,     // +2.5% enemy damage / player level
+  eliteChance: 0.003,
+};
+
+// --- Attack pace (ability frequency): cooldowns tick faster as runs deepen. -
+export const PACE = { floorRate: 0.025, levelRate: 0.008, max: 1.6 };
+
+// --- Boss tuning: bosses scale dramatically harder than regular enemies so
+// they survive to showcase their phases and stay the climax of the run. -----
+export const BOSS_TUNING = {
+  hpBase: 2.1,        // flat multiplier over the data HP
+  hpFloorRate: 0.35,  // +35% boss HP per floor
+  hpLevelRate: 0.09,  // +9% boss HP per player level
+  damageBase: 1.15,   // bosses hit harder than their data values
+  paceBonus: 0.15,    // extra ability-frequency on top of the shared pace
 };
 
 // Baseline chance for a normal enemy to spawn elite (before floor/difficulty).
@@ -62,6 +84,7 @@ export class DifficultyManager {
   constructor(difficultyId = DEFAULT_DIFFICULTY) {
     this.setDifficulty(difficultyId);
     this.floor = 1;
+    this.playerLevel = 1;
     this.modifiers = [];
   }
 
@@ -72,6 +95,7 @@ export class DifficultyManager {
   }
   get id() { return this.def.id; }
   setFloor(floor) { this.floor = Math.max(1, floor | 0); return this; }
+  setPlayerLevel(level) { this.playerLevel = Math.max(1, level | 0); return this; }
 
   addModifier(mod) {
     if (mod && !this.modifiers.some((m) => m.id === mod.id)) this.modifiers.push(mod);
@@ -90,19 +114,37 @@ export class DifficultyManager {
     for (const mod of this.modifiers) m *= mod[stat] ?? 1;
     return m;
   }
-  // Generic scaled multiplier for a stat (difficulty applies to every stat).
+  _levelFactor(stat) {
+    const rate = LEVEL_RATES[stat] || 0;
+    return 1 + rate * (this.playerLevel - 1);
+  }
+  // Generic scaled multiplier for a stat (difficulty × floor × player level ×
+  // modifiers). Future axes (Endless...) slot into this one product.
   mult(stat) {
-    return this.def.mult * this._floorFactor(stat) * this._modFactor(stat);
+    return this.def.mult * this._floorFactor(stat) * this._levelFactor(stat) * this._modFactor(stat);
+  }
+  // Cooldown/ability-frequency multiplier (difficulty-agnostic ramp).
+  pace(extra = 0) {
+    return Math.min(PACE.max, 1 + PACE.floorRate * (this.floor - 1) + PACE.levelRate * (this.playerLevel - 1) + extra);
   }
 
   // --- helper methods requested by the rest of the game --------------------
   // Enemy stat bundle (applied at spawn to base data values).
   enemyScale() {
-    return { hp: this.mult('hp'), damage: this.mult('damage'), speed: this.mult('speed') };
+    return { hp: this.mult('hp'), damage: this.mult('damage'), speed: this.mult('speed'), pace: this.pace() };
   }
-  // Bosses scale HP + damage but not movement (their speed is pattern-driven).
+  // Bosses scale far harder: flat base, steeper floor/level HP growth, bonus
+  // damage and ability frequency — they must outlive the player's burst.
   bossScale() {
-    return { hp: this.mult('hp'), damage: this.mult('damage') };
+    const T = BOSS_TUNING;
+    return {
+      hp: T.hpBase * this.def.mult
+        * (1 + T.hpFloorRate * (this.floor - 1))
+        * (1 + T.hpLevelRate * (this.playerLevel - 1))
+        * this._modFactor('hp'),
+      damage: T.damageBase * this.mult('damage'),
+      pace: this.pace(T.paceBonus),
+    };
   }
   // Multiplier applied to a room's enemy-count budget.
   spawnMultiplier() { return this.mult('spawnRate'); }
