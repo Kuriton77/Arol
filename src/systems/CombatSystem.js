@@ -90,6 +90,10 @@ export class CombatSystem {
     }
     // Chain lightning to a nearby other target.
     if (s.chain > 0 && !opts.noChain) this._chain(target, dmg * 0.5, s.chain);
+    // Volatile Rounds: a landed hit may detonate a small enemy-only blast.
+    if (s.explodeChance > 0 && !opts.noExplode && Math.random() < s.explodeChance) {
+      this._enemyBlast(target.x, target.y, 56, dmg * 0.5, '#ff8a3f', target);
+    }
 
     // Culling Strike: execute low-health non-boss enemies outright.
     if (!target.dead && s.cull > 0 && !target.isBossEntity &&
@@ -130,6 +134,40 @@ export class CombatSystem {
     }
   }
 
+  // Redirect a spent player projectile toward the nearest other enemy so it
+  // bounces (Ricochet boon). Returns false if there's nobody to hit.
+  _ricochet(pr, from) {
+    let best = null, bestD = 260 * 260;
+    for (const e of this._allTargets()) {
+      if (!e.alive || e === from) continue;
+      const d2 = (e.x - pr.x) ** 2 + (e.y - pr.y) ** 2;
+      if (d2 < bestD) { bestD = d2; best = e; }
+    }
+    if (!best) return false;
+    const a = Math.atan2(best.y - pr.y, best.x - pr.x);
+    const speed = Math.hypot(pr.vx, pr.vy) || 400;
+    pr.vx = Math.cos(a) * speed; pr.vy = Math.sin(a) * speed;
+    pr.pierce = 0; // spent; only the bounce carries it onward
+    this.ctx.particles.burst(pr.x, pr.y, pr.color || '#fff', 4, { speed: 120, life: 0.25 });
+    return true;
+  }
+
+  // Enemy-only area blast (player explosion boons) — never harms the player.
+  _enemyBlast(x, y, radius, dmg, color, exclude = null) {
+    const c = this.ctx;
+    c.particles.burst(x, y, color, 12, { speed: 220, life: 0.4 });
+    c.camera.addShake(2);
+    for (const e of this._allTargets()) {
+      if (!e.alive || e === exclude) continue;
+      if ((e.x - x) ** 2 + (e.y - y) ** 2 < (radius + e.radius) ** 2) {
+        if (e.hurt(Math.round(dmg))) {
+          c.damageNumbers.add(e.x, e.y - e.radius, Math.round(dmg), { color });
+          if (e.dead) c.onKilled(e);
+        }
+      }
+    }
+  }
+
   // Resolve the player's current attack step by its hit shape. All weapons run
   // through this one pipeline — arcs and thrusts scan targets, shot/bolt/nova
   // steps emit pooled projectiles; blade-boon projectiles ride along for all.
@@ -164,6 +202,14 @@ export class CombatSystem {
     if (!p._firedProjectile) {
       p._firedProjectile = true;
       const dmgBase = derive.damage(s, p.health / p.maxHealth);
+      // Single spawn helper so projectile-shaping boons (speed/size/ricochet)
+      // apply uniformly to every player projectile.
+      const shootP = (o) => {
+        o.vx *= s.projSpeedMult; o.vy *= s.projSpeedMult;
+        o.radius *= s.projSizeMult;
+        o.bounce = s.ricochet;
+        return c.projectiles.spawn(o);
+      };
 
       if (shape === 'shot' || shape === 'bolt') {
         let n = step.count ?? 1;
@@ -173,7 +219,7 @@ export class CombatSystem {
         for (let i = 0; i < n; i++) {
           const off = n === 1 ? 0 : (i / (n - 1) - 0.5) * spreadA * (n - 1);
           const a = p.swingDir + off;
-          c.projectiles.spawn({
+          shootP({
             x: p.x, y: p.y, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed,
             radius: shape === 'bolt' ? 8 : 6,
             damage: dmgBase * stepMult * s.projDamageMult,
@@ -188,7 +234,7 @@ export class CombatSystem {
         const speed = p.weapon.base.projSpeed || 430;
         for (let i = 0; i < n; i++) {
           const a = (i / n) * Math.PI * 2 + p.swingDir;
-          c.projectiles.spawn({
+          shootP({
             x: p.x, y: p.y, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed,
             radius: 8, damage: dmgBase * stepMult * s.projDamageMult,
             hostile: false, color: p.weapon.vfx.color,
@@ -202,7 +248,7 @@ export class CombatSystem {
 
       // Greatsword Shockwave boon: finisher launches a heavy wave.
       if (s.shockwave > 0 && step.finisher && (shape === 'arc' || shape === 'thrust')) {
-        c.projectiles.spawn({
+        shootP({
           x: p.x, y: p.y,
           vx: Math.cos(p.swingDir) * 340, vy: Math.sin(p.swingDir) * 340,
           radius: 16, damage: dmgBase * 0.8 * s.shockwave * s.projDamageMult,
@@ -218,7 +264,7 @@ export class CombatSystem {
         for (let i = 0; i < n; i++) {
           const off = n === 1 ? 0 : (i / (n - 1) - 0.5) * spread * n;
           const a = p.swingDir + off;
-          c.projectiles.spawn({
+          shootP({
             x: p.x, y: p.y, vx: Math.cos(a) * 520, vy: Math.sin(a) * 520,
             radius: 8, damage: dmgBase * 0.6 * s.projDamageMult,
             hostile: false, color: '#ffe08a', life: 0.9, pierce: 1, knockback: 120,
@@ -245,8 +291,11 @@ export class CombatSystem {
         for (const e of this._allTargets()) {
           if (!e.alive) continue;
           if (circlesOverlap(pr.x, pr.y, pr.radius, e.x, e.y, e.radius)) {
+            pr._lastHit = e;
             this.dealDamage(e, pr.damage, pr.x, pr.y, { knockback: pr.knockback, noChain: true });
-            if (pr.pierce > 0) { pr.pierce--; } else { pr.dead = true; break; }
+            if (pr.pierce > 0) { pr.pierce--; }
+            else if (pr.bounce > 0 && this._ricochet(pr, e)) { pr.bounce--; }
+            else { pr.dead = true; break; }
           }
         }
       }
@@ -329,7 +378,19 @@ export class CombatSystem {
     if (s.guardSwing && p.attackPhase !== 'idle') amount *= 0.75;
     // Armor reduces, fragility (void bargains) amplifies.
     amount *= (1 - Math.min(0.6, s.armor)) * (1 + s.fragile);
-    const dmg = Math.round(amount);
+    let dmg = Math.round(amount);
+    // Aegis shield soaks damage before health; being hit pauses its regen.
+    if (s.shieldMax > 0) {
+      p.shieldRegenT = 0;
+      if (p.shield > 0 && dmg > 0) {
+        const absorbed = Math.min(p.shield, dmg);
+        p.shield -= absorbed;
+        dmg -= absorbed;
+        c.damageNumbers.add(p.x, p.y - p.radius, absorbed, { color: '#8fd8ff' });
+        c.particles.burst(p.x, p.y, '#8fd8ff', 8, { speed: 160, life: 0.3 });
+        if (dmg <= 0) { p.iframes = CONFIG.player.hurtIframes * 0.5; c.audio.play('ui'); return; }
+      }
+    }
     // Second Wind: survive one lethal hit per floor.
     if (dmg >= p.health && s.secondWind && !s.secondWindUsed) {
       s.secondWindUsed = true;

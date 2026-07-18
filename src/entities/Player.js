@@ -32,6 +32,8 @@ export class Player extends Entity {
     this._hitThisSwing = new Set();
     this._firedProjectile = false;
     this.slowT = 0;            // spider-web slow timer
+    this.shield = 0;           // current Aegis shield (absorbs damage)
+    this.shieldRegenT = 0;     // time since last hit, for shield regen
 
     // Progression
     this.level = 1;
@@ -90,6 +92,13 @@ export class Player extends Entity {
     if (this.stats.surgeT > 0) this.stats.surgeT -= dt;
     if (this.stats.killSpeedT > 0) this.stats.killSpeedT -= dt;
     if (this.stats.regen > 0 && this.health < this.maxHealth) this.heal(this.stats.regen * dt);
+    // Aegis shield regenerates to full after ~3s without taking damage.
+    if (this.stats.shieldMax > 0) {
+      this.shieldRegenT += dt;
+      if (this.shieldRegenT > 3 && this.shield < this.stats.shieldMax) {
+        this.shield = Math.min(this.stats.shieldMax, this.shield + this.stats.shieldMax * 0.5 * dt);
+      }
+    }
 
     // --- attack phase machine ---
     const step = this.currentStep;

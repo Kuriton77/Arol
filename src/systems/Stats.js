@@ -50,6 +50,14 @@ export function createStats(weapon) {
     killSpeedT: 0,
     dashCrit: false,
     projDamageMult: 1,
+    // projectile shaping (P5 build variety)
+    projSpeedMult: 1,     // faster player projectiles
+    projSizeMult: 1,      // larger player projectiles (bigger hitbox)
+    ricochet: 0,          // player projectiles bounce to N extra targets
+    explodeChance: 0,     // chance a landed hit triggers a small AoE
+    // survivability (P5)
+    shieldMax: 0,         // regenerating shield capacity (absorbs damage)
+    luck: 0,              // improves upgrade rarity odds
     // economy
     xpMult: 0,
     shopDiscount: 0,

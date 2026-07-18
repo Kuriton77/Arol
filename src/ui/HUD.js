@@ -29,8 +29,17 @@ export class HUD {
     // --- Health bar ---
     const hpFrac = p.health / p.maxHealth;
     this._bar(16, 16, 260, 22, hpFrac, '#e8574a', '#3a1618');
+    // Aegis shield: a cyan overlay riding on top of the health fill.
+    if (p.stats.shieldMax > 0 && p.shield > 0.5) {
+      const shieldFrac = Math.min(1, p.shield / p.maxHealth);
+      c.save();
+      c.globalAlpha = 0.8;
+      this._bar(16, 16, 260, 22, shieldFrac, '#8fd8ff', 'rgba(0,0,0,0)');
+      c.restore();
+    }
     c.fillStyle = '#fff'; c.font = 'bold 13px "Trebuchet MS", system-ui'; c.textAlign = 'center'; c.textBaseline = 'middle';
-    c.fillText(`${Math.ceil(p.health)} / ${p.maxHealth}`, 16 + 130, 16 + 11);
+    const hpText = p.shield > 0.5 ? `${Math.ceil(p.health)} / ${p.maxHealth}  +${Math.ceil(p.shield)}` : `${Math.ceil(p.health)} / ${p.maxHealth}`;
+    c.fillText(hpText, 16 + 130, 16 + 11);
 
     // --- XP bar ---
     this._bar(16, 44, 260, 10, p.xp / p.xpToNext, '#4fd8ff', '#122a33');

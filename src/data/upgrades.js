@@ -247,6 +247,57 @@ const HANDWRITTEN = [
     desc: '+15 max health, reflect 30% contact damage',
     apply: (s) => { s.maxHealthBonus += 15; s.thorns += 0.3; },
   },
+  // -------------------------------------------------- P5 build-defining boons
+  {
+    id: 'pierce', name: 'Piercing Shots', rarity: 'rare', stackable: true,
+    desc: 'Projectiles pierce +1 enemy',
+    apply: (s) => { s.arrowPierce += 1; },
+  },
+  {
+    id: 'ricochet', name: 'Ricochet', rarity: 'epic', stackable: true,
+    desc: 'Projectiles bounce to +1 nearby enemy',
+    apply: (s) => { s.ricochet += 1; },
+  },
+  {
+    id: 'volatile', name: 'Volatile Rounds', rarity: 'epic', stackable: true, tags: ['fire'],
+    desc: '+20% chance a hit triggers a small explosion',
+    apply: (s) => { s.explodeChance += 0.20; },
+  },
+  {
+    id: 'velocity', name: 'High Velocity', rarity: 'common', stackable: true,
+    desc: '+30% projectile speed',
+    apply: (s) => { s.projSpeedMult += 0.30; },
+  },
+  {
+    id: 'biground', name: 'Heavy Rounds', rarity: 'common', stackable: true,
+    desc: '+35% projectile size, +10% projectile damage',
+    apply: (s) => { s.projSizeMult += 0.35; s.projDamageMult += 0.10; },
+  },
+  {
+    id: 'cdr', name: 'Momentum Core', rarity: 'rare', stackable: true, tags: ['dash'],
+    desc: '-18% dash cooldown',
+    apply: (s) => { s.dashCdMult *= 0.82; },
+  },
+  {
+    id: 'shield', name: 'Aegis Barrier', rarity: 'epic', stackable: true, tags: ['holy'],
+    desc: '+30 regenerating shield (absorbs damage)',
+    apply: (s) => { s.shieldMax += 30; },
+  },
+  {
+    id: 'bulwark_shield', name: 'Bulwark Plating', rarity: 'rare', stackable: true, tags: ['earth'],
+    desc: '+20 shield, take 6% less damage',
+    apply: (s) => { s.shieldMax += 20; s.armor += 0.06; },
+  },
+  {
+    id: 'luck', name: 'Lucky Charm', rarity: 'rare', stackable: true, tags: ['gold'],
+    desc: 'Improves the odds of rarer boons & relics',
+    apply: (s) => { s.luck += 1; },
+  },
+  {
+    id: 'fortune_luck', name: "Fortune's Favor", rarity: 'epic', stackable: true, tags: ['gold'],
+    desc: '+2 Luck, +15% gold',
+    apply: (s) => { s.luck += 2; s.greed += 0.15; },
+  },
 ];
 
 // Tiered variants of the core stat boons — higher rarity, bigger numbers.
@@ -286,10 +337,14 @@ export const UPGRADES = [...HANDWRITTEN, ...GENERATED];
 // Weighted random draw of `n` distinct upgrades, honouring stackability.
 // `sourcePool` lets callers mix in weapon-exclusive / relic pools.
 // `bias` ({tag: multiplier}) skews draws — biomes favour their element.
-export function drawUpgrades(rng, n, ownedCounts, sourcePool = UPGRADES, bias = null) {
+// `luck` (>=0) boosts the odds of rarer picks (Lucky Charm boon).
+export function drawUpgrades(rng, n, ownedCounts, sourcePool = UPGRADES, bias = null, luck = 0) {
   const pool = sourcePool.filter((u) => u.stackable || !(ownedCounts[u.id] > 0));
+  // Luck raises rare/epic/legendary weights (commons implicitly get rarer).
+  const LUCK_BOOST = { common: 0, rare: 0.15, epic: 0.28, legendary: 0.45 };
   const weightOf = (u) => {
     let w = RARITY[u.rarity].weight;
+    if (luck > 0) w *= 1 + luck * (LUCK_BOOST[u.rarity] ?? 0);
     if (bias && u.tags) {
       for (const t of u.tags) if (bias[t]) w *= bias[t];
     }

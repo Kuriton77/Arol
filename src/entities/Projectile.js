@@ -6,10 +6,10 @@ export function createProjectilePool() {
   return new ObjectPool(
     () => ({
       x: 0, y: 0, vx: 0, vy: 0, radius: 6, damage: 0,
-      hostile: true, color: '#fff', life: 3, pierce: 0, knockback: 120,
-      crit: false, dead: false,
+      hostile: true, color: '#fff', life: 3, pierce: 0, bounce: 0, knockback: 120,
+      crit: false, slow: false, dead: false,
     }),
-    (p, o) => { Object.assign(p, o); if (p.life == null) p.life = 3; },
+    (p, o) => { p.bounce = 0; p.slow = false; Object.assign(p, o); if (p.life == null) p.life = 3; },
   );
 }
 

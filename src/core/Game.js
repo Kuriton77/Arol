@@ -188,6 +188,7 @@ export class Game {
     this.player.stats.baseDamage *= 1 + SMITH_BONUS * this.save.smithLevel(weapon.id);
     this.player.refreshMaxHealth();
     this.player.health = this.player.maxHealth;
+    this.player.shield = this.player.stats.shieldMax; // start with any meta/relic shield
     // Run trackers for achievements.
     this._runMaxGold = 0;
     this._runSynergies = 0;
@@ -402,7 +403,8 @@ export class Game {
     const pool = this.choiceSource === 'relic' ? RELICS : this.boonPool;
     const bias = this.choiceSource === 'relic' && this.biome ? this.biome.lootBias : null;
     const nChoices = CONFIG.progression.upgradesOnLevel + (this.save.hasNode('p6') ? 1 : 0);
-    this.upgradeChoices = drawUpgrades(this.rng, nChoices, this.ownedCounts, pool, bias);
+    const luck = this.player ? (this.player.stats.luck || 0) : 0;
+    this.upgradeChoices = drawUpgrades(this.rng, nChoices, this.ownedCounts, pool, bias, luck);
     // Boss kills lead their relic choice with the boss-exclusive relic.
     if (this.choiceSource === 'relic' && this._pendingBossRelic) {
       const exclusive = relicById(this._pendingBossRelic);
@@ -433,6 +435,8 @@ export class Game {
       this.player.stats.healOnPick = 0;
     }
     if (this.player.health <= 0) this.player.health = 1; // glass cannon safety
+    // Top the Aegis shield up to its (possibly increased) capacity on pickup.
+    if (this.player.stats.shieldMax > 0) this.player.shield = this.player.stats.shieldMax;
     // Track synergy tags; announce any newly-unlocked synergies.
     if (u.tags) for (const t of u.tags) this.ownedTags[t] = (this.ownedTags[t] || 0) + 1;
     const fresh = this.synergy.recheck(this.ownedTags);
@@ -552,7 +556,8 @@ export class Game {
 
   // Build a fresh inventory of {upgrade, basePrice, bought} from a pool.
   _genShopItems(pool, costBase, bias, count = CONFIG.shop.items) {
-    const picks = drawUpgrades(this.rng, count, this.ownedCounts, pool, bias);
+    const luck = this.player ? (this.player.stats.luck || 0) : 0;
+    const picks = drawUpgrades(this.rng, count, this.ownedCounts, pool, bias, luck);
     return picks.map((u) => ({ upgrade: u, basePrice: costBase[u.rarity] ?? 10, bought: false }));
   }
 

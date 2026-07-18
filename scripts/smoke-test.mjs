@@ -759,6 +759,55 @@ assert(uiScalePhase.category === 'Interface', 'UI Scale lives in an Interface ca
 // Restore default scale so later work/screens are unaffected.
 await page.evaluate(() => { window.__AROL__.ui.setScale(1); });
 
+// --- P5 build variety: new boons wire into stats + combat plumbing ---
+const p5 = await page.evaluate(async () => {
+  const g = window.__AROL__;
+  const { UPGRADES, drawUpgrades } = await import('./src/data/upgrades.js');
+  const has = (id) => !!UPGRADES.find((u) => u.id === id);
+  const ids = ['pierce', 'ricochet', 'volatile', 'velocity', 'biground', 'cdr', 'shield', 'luck'];
+  const allPresent = ids.every(has);
+
+  g.save.data.difficulty = 'normal';
+  g.save.data.metaNodes = {};
+  g.startRun();
+  const p = g.player;
+  // Apply the new boons and confirm they mutate the shared stat object.
+  const get = (id) => UPGRADES.find((u) => u.id === id);
+  g._applyUpgrade(get('pierce'));
+  g._applyUpgrade(get('ricochet'));
+  g._applyUpgrade(get('velocity'));
+  g._applyUpgrade(get('biground'));
+  g._applyUpgrade(get('shield'));
+  const statsOk = p.stats.arrowPierce >= 1 && p.stats.ricochet >= 1
+    && p.stats.projSpeedMult > 1 && p.stats.projSizeMult > 1 && p.stats.shieldMax >= 30;
+  // Shield initialised to capacity on pickup.
+  const shieldOk = p.shield >= 30;
+  // Shield absorbs a hit before health.
+  const hp0 = p.health;
+  p.iframes = 0;
+  g.combat._damagePlayer(20, p.x + 50, p.y, 0);
+  const absorbedOk = p.health === hp0 && p.shield < 30;
+
+  // Luck skews draws toward rarer picks. Use two identical seeded streams so
+  // only the luck parameter differs (a fair, deterministic comparison).
+  const { makeRng } = await import('./src/core/math.js');
+  let rareNoLuck = 0, rareLuck = 0;
+  const rngA = makeRng(98765), rngB = makeRng(98765);
+  for (let i = 0; i < 600; i++) {
+    if (drawUpgrades(rngA, 1, {}, UPGRADES, null, 0)[0].rarity !== 'common') rareNoLuck++;
+    if (drawUpgrades(rngB, 1, {}, UPGRADES, null, 6)[0].rarity !== 'common') rareLuck++;
+  }
+  const luckOk = rareLuck > rareNoLuck;
+
+  return { allPresent, statsOk, shieldOk, absorbedOk, luckOk, rareNoLuck, rareLuck, total: UPGRADES.length };
+});
+console.log('  p5 phase:', JSON.stringify(p5));
+assert(p5.allPresent, 'all new P5 boons exist in the pool');
+assert(p5.statsOk, 'P5 boons mutate the shared stats (pierce/ricochet/projSpeed/projSize/shield)');
+assert(p5.shieldOk, 'shield initialises to capacity on pickup');
+assert(p5.absorbedOk, 'shield absorbs damage before health');
+assert(p5.luckOk, `Luck skews draws toward rarer picks (${p5.rareNoLuck}→${p5.rareLuck}/400)`);
+
 console.log('\nConsole errors:', errors.length);
 errors.slice(0, 20).forEach((e) => console.log('  !', e));
 assert(errors.length === 0, 'no console/page errors during full run');
